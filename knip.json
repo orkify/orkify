@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/daemon/index.ts",
+    "src/cluster/ClusterWrapper.ts",
+    "src/mcp/index.ts",
+    "bin/orkify"
+  ],
+  "project": ["src/**/*.ts"],
+  "ignore": ["src/types/**"],
+  "ignoreDependencies": ["@socket.io/sticky", "@socket.io/cluster-adapter", "socket.io"],
+  "ignoreExportsUsedInFile": true
+}

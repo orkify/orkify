@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+.nyc_output/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.*
+
+# Husky
+.husky/_
+
+# Cache
+.eslintcache
+
+# Claude Code (keep shared settings, ignore local)
+.claude/settings.local.json
+
+# ORKIFY runtime files (user home directory)
+# These are created at ~/.orkify/ but listed here for reference
