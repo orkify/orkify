@@ -3,6 +3,7 @@
   "entry": [
     "src/daemon/index.ts",
     "src/cluster/ClusterWrapper.ts",
+    "src/cli/crash-recovery.ts",
     "src/mcp/index.ts",
     "bin/orkify"
   ],

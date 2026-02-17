@@ -1,12 +1,18 @@
-import { writeFileSync, mkdirSync, existsSync, unlinkSync } from 'node:fs';
+import { spawn as spawnChild } from 'node:child_process';
+import { writeFileSync, mkdirSync, existsSync, unlinkSync, openSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   ORKIFY_HOME,
+  ORKIFY_DEPLOYS_DIR,
   DAEMON_PID_FILE,
+  DAEMON_LOG_FILE,
   SOCKET_PATH,
   IPCMessageType,
   TELEMETRY_DEFAULT_API_HOST,
 } from '../constants.js';
 import { CommandPoller } from '../deploy/CommandPoller.js';
+import { getOrkifyConfig } from '../deploy/config.js';
 import { DeployExecutor } from '../deploy/DeployExecutor.js';
 import { DaemonServer, type ClientConnection } from '../ipc/DaemonServer.js';
 import { createResponse } from '../ipc/protocol.js';
@@ -15,6 +21,8 @@ import type {
   DeployCommand,
   DeployLocalPayload,
   DeployOptions,
+  DeployRestorePayload,
+  DeploySettings,
   UpPayload,
   TargetPayload,
   LogsPayload,
@@ -23,6 +31,9 @@ import type {
   ProcessConfig,
 } from '../types/index.js';
 import { Orchestrator } from './Orchestrator.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Prepend ISO timestamps to all daemon log output
 const originalLog = console.log.bind(console);
@@ -168,6 +179,84 @@ server.registerHandler(IPCMessageType.DEPLOY_LOCAL, async (request) => {
   return createResponse(request.id, true, { deployed: true });
 });
 
+server.registerHandler(IPCMessageType.DEPLOY_RESTORE, async (request) => {
+  const p = request.payload as DeployRestorePayload;
+
+  if (p.downloadUrl) {
+    // New version available — run full deploy
+    const cmd: DeployCommand = {
+      type: 'deploy',
+      deployId: `restore-${p.version}`,
+      targetId: 'restore',
+      artifactId: p.artifactId,
+      version: p.version,
+      sha256: p.sha256,
+      sizeBytes: p.sizeBytes,
+      downloadToken: '',
+      downloadUrl: p.downloadUrl,
+      deployConfig: p.deployConfig as DeploySettings,
+    };
+    const deployOptions: DeployOptions = {
+      secrets: p.secrets,
+      skipTelemetry: !telemetry,
+    };
+    const config = {
+      apiKey: apiKey ?? '',
+      apiHost: process.env.ORKIFY_API_HOST || TELEMETRY_DEFAULT_API_HOST,
+    };
+    const executor = new DeployExecutor(
+      config,
+      orchestrator,
+      telemetry as TelemetryReporter,
+      cmd,
+      deployOptions
+    );
+    await executor.execute();
+    return createResponse(request.id, true, { deployed: true, version: p.version });
+  } else {
+    // Current is latest — reconcile from local with secrets
+    const currentLink = join(ORKIFY_DEPLOYS_DIR, 'current');
+    const fileConfig = getOrkifyConfig(currentLink);
+    if (!fileConfig?.processes?.length) {
+      return createResponse(request.id, false, undefined, 'No processes defined in orkify.yml');
+    }
+    const configs = fileConfig.processes.map((c) => ({
+      ...c,
+      script: join(currentLink, c.script),
+      cwd: currentLink,
+    }));
+    const result = await orchestrator.reconcile(configs, p.secrets);
+    return createResponse(request.id, true, result);
+  }
+});
+
+server.registerHandler(IPCMessageType.CONFIGURE_TELEMETRY, async (request) => {
+  const payload = request.payload as { apiKey: string; apiHost: string };
+
+  if (telemetry) {
+    // Already configured — nothing to do
+    return createResponse(request.id, true, { configured: false, reason: 'already_active' });
+  }
+
+  if (!payload.apiKey) {
+    return createResponse(request.id, true, { configured: false, reason: 'no_key' });
+  }
+
+  const config = { apiKey: payload.apiKey, apiHost: payload.apiHost };
+  telemetry = new TelemetryReporter(config, orchestrator);
+  telemetry.start();
+
+  const poller = new CommandPoller(config, orchestrator, telemetry);
+  poller.start();
+
+  // Store in process.env so KILL_DAEMON can forward them to the next daemon
+  process.env.ORKIFY_API_KEY = payload.apiKey;
+  process.env.ORKIFY_API_HOST = payload.apiHost;
+
+  console.log(`Telemetry configured at runtime → ${payload.apiHost}`);
+  return createResponse(request.id, true, { configured: true });
+});
+
 server.registerHandler(IPCMessageType.KILL_DAEMON, async (request) => {
   // Schedule shutdown after sending response
   setTimeout(async () => {
@@ -226,6 +315,59 @@ async function gracefulShutdown(): Promise<void> {
   cleanup();
 }
 
+/**
+ * Spawn a detached crash-recovery process that will start a new daemon
+ * and restore all running process configs. Only runs once — if this daemon
+ * was itself started by crash recovery (ORKIFY_CRASH_RECOVERY is set),
+ * we skip to prevent infinite crash loops.
+ */
+function crashRecovery(): void {
+  if (process.env.ORKIFY_CRASH_RECOVERY) {
+    console.error('Skipping crash recovery — this daemon was started by crash recovery');
+    return;
+  }
+
+  try {
+    const configs = orchestrator.getRunningConfigs();
+    if (configs.length === 0) {
+      console.error('Crash recovery: no running processes to restore');
+      return;
+    }
+
+    const env: Record<string, string> = {};
+    if (process.env.ORKIFY_API_KEY) env.ORKIFY_API_KEY = process.env.ORKIFY_API_KEY;
+    if (process.env.ORKIFY_API_HOST) env.ORKIFY_API_HOST = process.env.ORKIFY_API_HOST;
+
+    const payload = JSON.stringify({ env, configs });
+    const recoveryScript = join(__dirname, '..', 'cli', 'crash-recovery.js');
+
+    // Remove PID file and socket now so the recovery script doesn't have to
+    // wait for gracefulShutdown() — which may hang in a crashing process.
+    cleanup();
+
+    const logFd = openSync(DAEMON_LOG_FILE, 'a');
+
+    const child = spawnChild(process.execPath, [recoveryScript], {
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+      env: { ...process.env, ORKIFY_CRASH_RECOVERY: payload },
+    });
+    child.unref();
+
+    console.error(`Crash recovery: spawned recovery process (PID: ${child.pid})`);
+  } catch (err) {
+    console.error('Crash recovery: failed to spawn recovery process:', (err as Error).message);
+  }
+}
+
+// SIGUSR2 handler for crash testing (Unix only) — triggers an uncaught exception
+// which exercises the crashRecovery → gracefulShutdown → exit path.
+if (process.platform !== 'win32') {
+  process.on('SIGUSR2', () => {
+    throw new Error('SIGUSR2 crash trigger');
+  });
+}
+
 process.on('SIGTERM', async () => {
   await gracefulShutdown();
   process.exit(0);
@@ -238,12 +380,14 @@ process.on('SIGINT', async () => {
 
 process.on('uncaughtException', async (err) => {
   console.error('Uncaught exception:', err);
+  crashRecovery();
   await gracefulShutdown();
   process.exit(1);
 });
 
 process.on('unhandledRejection', async (reason) => {
   console.error('Unhandled rejection:', reason);
+  crashRecovery();
   await gracefulShutdown();
   process.exit(1);
 });
@@ -253,6 +397,17 @@ server
   .start()
   .then(() => {
     console.log(`ORKIFY daemon started (PID: ${process.pid})`);
+
+    // If this daemon was started by crash recovery, re-enable crash recovery
+    // after a stability window. If it crashes again within 60s it's likely
+    // the same root cause — the guard in crashRecovery() prevents a loop.
+    if (process.env.ORKIFY_CRASH_RECOVERY) {
+      const stabilityTimer = setTimeout(() => {
+        delete process.env.ORKIFY_CRASH_RECOVERY;
+        console.log('Crash recovery re-enabled after stability window');
+      }, 60_000);
+      stabilityTimer.unref();
+    }
   })
   .catch((err) => {
     console.error('Failed to start daemon:', err);

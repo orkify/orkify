@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import { DAEMON_PID_FILE, IPCMessageType } from '../../constants.js';
+import { IPCMessageType } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
+import { restoreDaemon } from '../../ipc/restoreDaemon.js';
 import type { ProcessConfig, ProcessInfo } from '../../types/index.js';
 
 export const daemonReloadCommand = new Command('daemon-reload')
@@ -26,20 +26,9 @@ export const daemonReloadCommand = new Command('daemon-reload')
       }
       daemonClient.disconnect();
 
-      // Forward the old daemon's telemetry env vars to the new daemon
-      daemonClient.setSpawnEnv(daemonEnv);
-
-      // Wait for the old daemon to fully exit before starting a new one.
-      // A fixed delay is not enough — on slow CI systems shutdown() can take longer
-      // than the delay, causing us to reconnect to the dying daemon instead of a new one.
-      const deadline = Date.now() + 10000;
-      while (existsSync(DAEMON_PID_FILE) && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
-
       // 2. Start new daemon and restore processes from in-memory configs
       console.log(chalk.blue('⟳ Starting new daemon and restoring processes...'));
-      const resResponse = await daemonClient.request(IPCMessageType.RESTORE_CONFIGS, processes);
+      const resResponse = await restoreDaemon(daemonClient, processes, daemonEnv);
 
       if (resResponse.success) {
         const results = resResponse.data as ProcessInfo[];

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 export const ORKIFY_HOME = join(homedir(), '.orkify');
 export const SNAPSHOT_FILE = join(ORKIFY_HOME, 'snapshot.yml');
 export const DAEMON_PID_FILE = join(ORKIFY_HOME, 'daemon.pid');
+export const DAEMON_LOCK_FILE = join(ORKIFY_HOME, 'daemon.lock');
 export const DAEMON_LOG_FILE = join(ORKIFY_HOME, 'daemon.log');
 export const LOGS_DIR = join(ORKIFY_HOME, 'logs');
 
@@ -69,7 +70,9 @@ export const IPCMessageType = {
   RESTORE: 'restore',
   RESTORE_CONFIGS: 'restore_configs',
   DEPLOY_LOCAL: 'deploy_local',
+  DEPLOY_RESTORE: 'deploy_restore',
   KILL_DAEMON: 'kill_daemon',
+  CONFIGURE_TELEMETRY: 'configure_telemetry',
   PING: 'ping',
 
   // Responses
@@ -201,6 +204,7 @@ export const METRICS_PROBE_IMPORT = `--import=data:text/javascript;base64,${Buff
 
 // Deploy
 export const ORKIFY_DEPLOYS_DIR = join(ORKIFY_HOME, 'deploys');
+export const DEPLOY_META_FILE = 'orkify-deploy-meta.json';
 export const DEPLOY_CRASH_WINDOW_DEFAULT = 30; // seconds
 export const ORKIFY_CONFIG_FILE = 'orkify.yml';
 
