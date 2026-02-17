@@ -14,7 +14,7 @@ import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { orkify, sleep, waitForProcessOnline } from './test-utils.js';
+import { orkify, sleep, waitForHttpReady, waitForProcessOnline } from './test-utils.js';
 
 describe('Log Rotation', () => {
   const appName = 'test-log-rotation';
@@ -145,6 +145,7 @@ describe('Log Rotation', () => {
     expect(restartOutput).toContain('restarted');
 
     await waitForProcessOnline(appName);
+    await waitForHttpReady('http://localhost:3048/');
 
     // Generate log output after restart
     for (let i = 0; i < 3; i++) {
