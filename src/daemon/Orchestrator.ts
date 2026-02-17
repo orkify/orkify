@@ -9,6 +9,9 @@ import {
   DEFAULT_MIN_UPTIME,
   DEFAULT_RESTART_DELAY,
   DEFAULT_RELOAD_RETRIES,
+  DEFAULT_LOG_MAX_SIZE,
+  DEFAULT_LOG_MAX_FILES,
+  DEFAULT_LOG_MAX_AGE,
   KILL_TIMEOUT,
 } from '../constants.js';
 import { StateStore } from '../state/StateStore.js';
@@ -77,6 +80,9 @@ export class Orchestrator extends EventEmitter {
       port: payload.port,
       reloadRetries: payload.reloadRetries ?? DEFAULT_RELOAD_RETRIES,
       healthCheck: payload.healthCheck,
+      logMaxSize: payload.logMaxSize ?? DEFAULT_LOG_MAX_SIZE,
+      logMaxFiles: payload.logMaxFiles ?? DEFAULT_LOG_MAX_FILES,
+      logMaxAge: payload.logMaxAge ?? DEFAULT_LOG_MAX_AGE,
     };
 
     const processId = this.nextProcessId++;
@@ -207,6 +213,11 @@ export class Orchestrator extends EventEmitter {
     return results;
   }
 
+  async flushLogs(target: string | number | 'all'): Promise<void> {
+    const containers = this.resolveTarget(target);
+    await Promise.all(containers.map((c) => c.flushLogs()));
+  }
+
   list(): ProcessInfo[] {
     return Array.from(this.processes.values()).map((p) => p.getInfo());
   }
@@ -253,6 +264,9 @@ export class Orchestrator extends EventEmitter {
           port: config.port,
           reloadRetries: config.reloadRetries,
           healthCheck: config.healthCheck,
+          logMaxSize: config.logMaxSize,
+          logMaxFiles: config.logMaxFiles,
+          logMaxAge: config.logMaxAge,
         });
 
         results.push(info);
@@ -330,6 +344,9 @@ export class Orchestrator extends EventEmitter {
         port: config.port,
         reloadRetries: config.reloadRetries,
         healthCheck: config.healthCheck,
+        logMaxSize: config.logMaxSize,
+        logMaxFiles: config.logMaxFiles,
+        logMaxAge: config.logMaxAge,
       };
 
       if (!runningNames.has(config.name)) {

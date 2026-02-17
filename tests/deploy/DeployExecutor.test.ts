@@ -90,6 +90,9 @@ processes:
         sticky: true,
         port: 3000,
         healthCheck: '/health',
+        logMaxSize: 100 * 1024 * 1024,
+        logMaxFiles: 90,
+        logMaxAge: 90 * 24 * 60 * 60 * 1000,
       },
     ];
 

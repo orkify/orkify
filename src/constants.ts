@@ -36,6 +36,10 @@ export const DEFAULT_MAX_RESTARTS = 10;
 export const DEFAULT_MIN_UPTIME = 1000;
 export const DEFAULT_RESTART_DELAY = 100;
 export const DEFAULT_RELOAD_RETRIES = 3;
+export const MIN_LOG_MAX_SIZE = 1024; // 1 KB floor
+export const DEFAULT_LOG_MAX_SIZE = 100 * 1024 * 1024; // 100 MB
+export const DEFAULT_LOG_MAX_FILES = 90;
+export const DEFAULT_LOG_MAX_AGE = 90 * 24 * 60 * 60 * 1000; // 90 days in ms
 
 // Process status
 export const ProcessStatus = {
@@ -75,6 +79,7 @@ export const IPCMessageType = {
   CONFIGURE_TELEMETRY: 'configure_telemetry',
   PING: 'ping',
   CRASH_TEST: 'crash_test',
+  FLUSH: 'flush',
 
   // Responses
   SUCCESS: 'success',

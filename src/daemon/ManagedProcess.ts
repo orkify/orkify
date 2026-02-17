@@ -1,6 +1,6 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { createWriteStream, type WriteStream, mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { watch, type FSWatcher } from 'chokidar';
@@ -13,6 +13,7 @@ import {
   LAUNCH_TIMEOUT,
 } from '../constants.js';
 import type { ProcessConfig, ProcessInfo, WorkerInfo } from '../types/index.js';
+import { RotatingWriter } from './RotatingWriter.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -51,8 +52,8 @@ export class ManagedProcess extends EventEmitter {
   private slotCrashes = new Map<number, number>();
 
   private launchTimers = new Map<number, NodeJS.Timeout>();
-  private logStream: WriteStream | null = null;
-  private errStream: WriteStream | null = null;
+  private outWriter: RotatingWriter | null = null;
+  private errWriter: RotatingWriter | null = null;
   private watcher: FSWatcher | null = null;
   private isShuttingDown = false;
   private isReloading = false;
@@ -88,19 +89,21 @@ export class ManagedProcess extends EventEmitter {
       mkdirSync(LOGS_DIR, { recursive: true });
     }
 
-    const outPath = join(LOGS_DIR, `${this.config.name}-out.log`);
-    const errPath = join(LOGS_DIR, `${this.config.name}-err.log`);
+    const outPath = join(LOGS_DIR, `${this.config.name}.stdout.log`);
+    const errPath = join(LOGS_DIR, `${this.config.name}.stderr.log`);
 
-    this.logStream = createWriteStream(outPath, { flags: 'a' });
-    this.errStream = createWriteStream(errPath, { flags: 'a' });
-
-    // Prevent unhandled stream errors (e.g., disk full, permission denied) from crashing the daemon
-    this.logStream.on('error', (err) => {
-      console.error(`[${this.config.name}] Log write error (stdout):`, err.message);
-    });
-    this.errStream.on('error', (err) => {
-      console.error(`[${this.config.name}] Log write error (stderr):`, err.message);
-    });
+    this.outWriter = new RotatingWriter(
+      outPath,
+      this.config.logMaxSize,
+      this.config.logMaxFiles,
+      this.config.logMaxAge
+    );
+    this.errWriter = new RotatingWriter(
+      errPath,
+      this.config.logMaxSize,
+      this.config.logMaxFiles,
+      this.config.logMaxAge
+    );
   }
 
   async start(): Promise<void> {
@@ -614,9 +617,9 @@ export class ManagedProcess extends EventEmitter {
     const logLine = `[${timestamp}] [${this.config.name}:${workerLabel}] ${line}`;
 
     if (type === 'out') {
-      this.logStream?.write(logLine);
+      this.outWriter?.write(logLine);
     } else {
-      this.errStream?.write(logLine);
+      this.errWriter?.write(logLine);
     }
 
     this.emit('log', { type, workerId, data: line });
@@ -699,8 +702,12 @@ export class ManagedProcess extends EventEmitter {
       await this.stopCluster();
     }
 
-    this.logStream?.end();
-    this.errStream?.end();
+    this.outWriter?.end();
+    this.errWriter?.end();
+  }
+
+  async flushLogs(): Promise<void> {
+    await Promise.all([this.outWriter?.flush(), this.errWriter?.flush()]);
   }
 
   private async stopFork(): Promise<void> {
@@ -759,6 +766,8 @@ export class ManagedProcess extends EventEmitter {
     this.clusterWorkers.clear();
     this.slotRestarts.clear();
     this.slotCrashes.clear();
+    // Re-create log writers since stop() closed them
+    this.setupLogStreams();
     await this.start();
   }
 

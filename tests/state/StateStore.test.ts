@@ -37,6 +37,9 @@ describe('StateStore', () => {
     minUptime: 1000,
     restartDelay: 100,
     sticky: false,
+    logMaxSize: 100 * 1024 * 1024,
+    logMaxFiles: 90,
+    logMaxAge: 90 * 24 * 60 * 60 * 1000,
   });
 
   describe('save', () => {

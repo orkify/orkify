@@ -3,7 +3,12 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { parse, stringify } from 'yaml';
-import { ORKIFY_CONFIG_FILE } from '../constants.js';
+import {
+  DEFAULT_LOG_MAX_AGE,
+  DEFAULT_LOG_MAX_FILES,
+  DEFAULT_LOG_MAX_SIZE,
+  ORKIFY_CONFIG_FILE,
+} from '../constants.js';
 import type { DeploySettings, ProcessConfig, SavedState } from '../types/index.js';
 
 interface PackageManager {
@@ -130,6 +135,9 @@ export async function interactiveConfig(projectDir: string): Promise<SavedState>
     minUptime: 1000,
     restartDelay: 100,
     sticky: false,
+    logMaxSize: DEFAULT_LOG_MAX_SIZE,
+    logMaxFiles: DEFAULT_LOG_MAX_FILES,
+    logMaxAge: DEFAULT_LOG_MAX_AGE,
   };
 
   return {

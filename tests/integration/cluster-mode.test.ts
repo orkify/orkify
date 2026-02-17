@@ -49,35 +49,51 @@ describe('Cluster Mode', () => {
 
   it('performs zero-downtime reload', async () => {
     // Ensure cluster is fully healthy before testing reload
-    // Make multiple consecutive successful requests to verify all workers are ready
+    await waitForWorkersOnline(appName, 4);
+
+    // Verify 8 consecutive HTTP successes to confirm cluster is stable
     let consecutiveSuccesses = 0;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 30 && consecutiveSuccesses < 8; i++) {
       const { status } = await httpGet('http://localhost:4000/health');
-      if (status === 200) {
-        consecutiveSuccesses++;
-        // Need 8 consecutive successes to ensure cluster is stable
-        if (consecutiveSuccesses >= 8) break;
-      } else {
-        consecutiveSuccesses = 0;
-      }
+      if (status === 200) consecutiveSuccesses++;
+      else consecutiveSuccesses = 0;
       await sleep(50);
     }
     expect(consecutiveSuccesses).toBeGreaterThanOrEqual(8);
 
+    // Collect PIDs from the pre-reload cluster
+    const pidsBefore = new Set<number>();
+    for (let i = 0; i < 8; i++) {
+      const { body } = await httpGet('http://localhost:4000/health');
+      try {
+        pidsBefore.add(JSON.parse(body).pid);
+      } catch {
+        // Ignore parse errors
+      }
+    }
+
     let successfulRequests = 0;
     let failedRequests = 0;
+    let stopRequests = false;
+    const pidsAfter = new Set<number>();
 
     // Start reload
     const reloadProcess = spawnOrkify(['reload', appName], {
       stdio: 'pipe',
     });
+    const reloadDone = new Promise<void>((resolve) => reloadProcess.on('close', () => resolve()));
 
-    // Make requests during reload
+    // Send requests continuously throughout the reload
     const requestLoop = async () => {
-      for (let i = 0; i < 20; i++) {
-        const { status } = await httpGet('http://localhost:4000/health');
+      while (!stopRequests) {
+        const { status, body } = await httpGet('http://localhost:4000/health');
         if (status === 200) {
           successfulRequests++;
+          try {
+            pidsAfter.add(JSON.parse(body).pid);
+          } catch {
+            // Ignore parse errors
+          }
         } else {
           failedRequests++;
         }
@@ -85,13 +101,22 @@ describe('Cluster Mode', () => {
       }
     };
 
-    await Promise.all([
-      requestLoop(),
-      new Promise<void>((resolve) => reloadProcess.on('close', () => resolve())),
-    ]);
+    const loopPromise = requestLoop();
 
-    // Zero-downtime: at most 1 failed request allowed (timing can cause occasional failures in CI)
+    // Wait for reload to finish, then keep probing briefly to verify stability
+    await reloadDone;
+    await sleep(500);
+    stopRequests = true;
+    await loopPromise;
+
+    const totalRequests = successfulRequests + failedRequests;
+
+    // 1. Zero-downtime: at most 1 failed request during the entire reload
     expect(failedRequests).toBeLessThanOrEqual(1);
-    expect(successfulRequests).toBeGreaterThanOrEqual(19);
+    // 2. Must have sent enough requests to actually cover the reload window
+    expect(totalRequests).toBeGreaterThanOrEqual(10);
+    // 3. Workers were actually replaced — new PIDs appeared that weren't in the old set
+    const newPids = [...pidsAfter].filter((pid) => !pidsBefore.has(pid));
+    expect(newPids.length).toBeGreaterThan(0);
   });
 });

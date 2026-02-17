@@ -8,6 +8,9 @@ import {
   DEFAULT_MIN_UPTIME,
   DEFAULT_RESTART_DELAY,
   DEFAULT_RELOAD_RETRIES,
+  DEFAULT_LOG_MAX_SIZE,
+  DEFAULT_LOG_MAX_FILES,
+  DEFAULT_LOG_MAX_AGE,
   KILL_TIMEOUT,
 } from '../../src/constants.js';
 import { Orchestrator } from '../../src/daemon/Orchestrator.js';
@@ -55,6 +58,9 @@ describe('Orchestrator.reconcile', () => {
       restartDelay: DEFAULT_RESTART_DELAY,
       sticky: false,
       reloadRetries: DEFAULT_RELOAD_RETRIES,
+      logMaxSize: DEFAULT_LOG_MAX_SIZE,
+      logMaxFiles: DEFAULT_LOG_MAX_FILES,
+      logMaxAge: DEFAULT_LOG_MAX_AGE,
       ...overrides,
     };
   }

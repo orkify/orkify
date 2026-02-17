@@ -51,6 +51,9 @@ describe('ManagedProcess edge cases', () => {
     minUptime: 1000,
     restartDelay: 100,
     sticky: false,
+    logMaxSize: 100 * 1024 * 1024,
+    logMaxFiles: 90,
+    logMaxAge: 90 * 24 * 60 * 60 * 1000,
     ...overrides,
   });
 
@@ -317,12 +320,12 @@ describe('ManagedProcess edge cases', () => {
       mkdirSync(readOnlyLogsDir, { recursive: true });
 
       // Create the log files first (they need to exist for createWriteStream)
-      writeFileSync(join(readOnlyLogsDir, 'test-edge-out.log'), '');
-      writeFileSync(join(readOnlyLogsDir, 'test-edge-err.log'), '');
+      writeFileSync(join(readOnlyLogsDir, 'test-edge.stdout.log'), '');
+      writeFileSync(join(readOnlyLogsDir, 'test-edge.stderr.log'), '');
 
       // Make the directory read-only
-      chmodSync(join(readOnlyLogsDir, 'test-edge-out.log'), 0o000);
-      chmodSync(join(readOnlyLogsDir, 'test-edge-err.log'), 0o000);
+      chmodSync(join(readOnlyLogsDir, 'test-edge.stdout.log'), 0o000);
+      chmodSync(join(readOnlyLogsDir, 'test-edge.stderr.log'), 0o000);
 
       // ManagedProcess uses LOGS_DIR from constants, which we can't easily
       // override. Instead, we test that log stream errors don't propagate
@@ -351,8 +354,8 @@ describe('ManagedProcess edge cases', () => {
       }).not.toThrow();
 
       // Restore permissions for cleanup
-      chmodSync(join(readOnlyLogsDir, 'test-edge-out.log'), 0o644);
-      chmodSync(join(readOnlyLogsDir, 'test-edge-err.log'), 0o644);
+      chmodSync(join(readOnlyLogsDir, 'test-edge.stdout.log'), 0o644);
+      chmodSync(join(readOnlyLogsDir, 'test-edge.stderr.log'), 0o644);
 
       await container.stop();
     }, 10000);

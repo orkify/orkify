@@ -5,6 +5,10 @@ import {
   DEFAULT_MIN_UPTIME,
   DEFAULT_RESTART_DELAY,
   DEFAULT_RELOAD_RETRIES,
+  MIN_LOG_MAX_SIZE,
+  DEFAULT_LOG_MAX_SIZE,
+  DEFAULT_LOG_MAX_FILES,
+  DEFAULT_LOG_MAX_AGE,
   KILL_TIMEOUT,
 } from '../constants.js';
 
@@ -25,6 +29,9 @@ export const startOptionsSchema = z.object({
   port: z.number().int().positive().optional(),
   reloadRetries: z.number().int().min(0).max(3).default(DEFAULT_RELOAD_RETRIES),
   healthCheck: z.string().startsWith('/').optional(),
+  logMaxSize: z.number().int().min(MIN_LOG_MAX_SIZE).default(DEFAULT_LOG_MAX_SIZE),
+  logMaxFiles: z.number().int().min(0).max(10000).default(DEFAULT_LOG_MAX_FILES),
+  logMaxAge: z.number().int().nonnegative().default(DEFAULT_LOG_MAX_AGE),
 });
 
 export type StartOptions = z.infer<typeof startOptionsSchema>;

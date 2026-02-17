@@ -19,6 +19,9 @@ export interface ProcessConfig {
   port?: number;
   reloadRetries?: number;
   healthCheck?: string;
+  logMaxSize: number;
+  logMaxFiles: number;
+  logMaxAge: number;
 }
 
 export interface WorkerInfo {
@@ -100,6 +103,9 @@ export interface UpPayload {
   port?: number;
   reloadRetries?: number;
   healthCheck?: string;
+  logMaxSize?: number;
+  logMaxFiles?: number;
+  logMaxAge?: number;
 }
 
 export interface TargetPayload {

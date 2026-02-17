@@ -65,6 +65,7 @@ orkify run app.js -w 4
 | `orkify list --all-users`        | List processes from all users (requires sudo) |
 | `orkify logs [name]`             | View logs (-f to follow)                      |
 | `orkify delete <name\|id\|all>`  | Stop and remove from process list             |
+| `orkify flush [name\|id\|all]`   | Truncate logs and remove rotated archives     |
 | `orkify snap [file] [--no-env]`  | Snapshot current process list                 |
 | `orkify restore [file]`          | Restore previously saved processes            |
 | `orkify kill`                    | Stop the daemon                               |
@@ -251,6 +252,9 @@ ORKIFY_API_KEY=orkify_xxx orkify up app.js
 --port <port>             Port for sticky routing (defaults to PORT env)
 --reload-retries <count>  Retries per worker slot during reload (0-3, default: 3)
 --health-check <path>     Health check endpoint (e.g. /health, requires --port)
+--log-max-size <size>     Max log file size before rotation (default: 100M)
+--log-max-files <count>   Rotated log files to keep (default: 90, 0 = no rotation)
+--log-max-age <days>      Delete rotated logs older than N days (default: 90, 0 = no limit)
 ```
 
 ## Environment Files
@@ -358,6 +362,9 @@ processes:
 | `port`          | —                  | Port for sticky session routing                          |
 | `reloadRetries` | `3`                | Retries per worker slot during reload (0-3)              |
 | `healthCheck`   | —                  | Health check endpoint path (e.g. `/health`)              |
+| `logMaxSize`    | `104857600`        | Max log file size in bytes before rotation (100 MB)      |
+| `logMaxFiles`   | `90`               | Max rotated log files to keep (0 = no rotation)          |
+| `logMaxAge`     | `7776000000`       | Max age of rotated logs in ms (90 days, 0 = no limit)    |
 
 A minimal config:
 
@@ -368,6 +375,64 @@ processes:
 ```
 
 All string values are double-quoted in the generated file to prevent YAML type coercion (e.g. `"3000"` stays a string, not an integer). If you hand-edit the file, unquoted env values like `PORT: 3000` or `DEBUG: true` are automatically coerced back to strings when loaded. Quoting is still recommended to avoid surprises (e.g. `1.0` parses as `1`).
+
+## Log Rotation
+
+orkify automatically rotates process logs to prevent unbounded disk growth. Logs are written to `~/.orkify/logs/` and rotated when a file exceeds the size threshold or on the first write of a new day.
+
+### How It Works
+
+1. When a log file exceeds `--log-max-size` (default: 100 MB) or a new calendar day starts, orkify rotates the file
+2. The rotated file is compressed with gzip in the background (typically ~90% compression)
+3. Archives older than `--log-max-age` days are deleted
+4. If the archive count still exceeds `--log-max-files`, the oldest are pruned
+
+### Defaults
+
+| Setting           | Default | Description                               |
+| ----------------- | ------- | ----------------------------------------- |
+| `--log-max-size`  | `100M`  | Rotate when file exceeds 100 MB           |
+| `--log-max-files` | `90`    | Keep up to 90 rotated archives per stream |
+| `--log-max-age`   | `90`    | Delete archives older than 90 days        |
+
+With defaults, each process uses at most ~200 MB of log storage: one 100 MB active file + up to 90 compressed archives (~1 MB each).
+
+### File Layout
+
+```
+~/.orkify/logs/
+  myapp.stdout.log                            # active (current writes)
+  myapp.stdout.log-20260215T091200.123.gz     # rotated + compressed
+  myapp.stdout.log-20260216T143052.456.gz
+  myapp.stderr.log                            # active stderr
+  myapp.stderr.log-20260217T080000.789.gz
+```
+
+### Configuration
+
+```bash
+# Custom rotation settings
+orkify up app.js --log-max-size 50M --log-max-files 30 --log-max-age 30
+
+# Disable rotation (logs grow unbounded)
+orkify up app.js --log-max-files 0
+
+# Size accepts K, M, G suffixes
+orkify up app.js --log-max-size 500K
+orkify up app.js --log-max-size 1G
+```
+
+### Flushing Logs
+
+Truncate active log files and remove all rotated archives:
+
+```bash
+# Flush logs for all processes
+orkify flush
+
+# Flush logs for a specific process
+orkify flush my-api
+```
 
 ## Boot Persistence
 

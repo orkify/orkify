@@ -284,6 +284,12 @@ server.registerHandler(IPCMessageType.PING, async (request) => {
   return createResponse(request.id, true, { pong: true, status: orchestrator.getDaemonStatus() });
 });
 
+server.registerHandler(IPCMessageType.FLUSH, async (request) => {
+  const payload = request.payload as TargetPayload;
+  await orchestrator.flushLogs(payload.target);
+  return createResponse(request.id, true, { flushed: true });
+});
+
 server.registerHandler(IPCMessageType.CRASH_TEST, async (request) => {
   // Throw after responding so the uncaughtException handler triggers crash recovery.
   setTimeout(() => {

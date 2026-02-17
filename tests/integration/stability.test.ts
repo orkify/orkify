@@ -188,8 +188,8 @@ describe('Daemon log resilience', () => {
     // Make the log files read-only to trigger write errors
     const logsDir = join(resolve(process.env.HOME || '~'), '.orkify', 'logs');
     try {
-      chmodSync(join(logsDir, `${appName}-out.log`), 0o000);
-      chmodSync(join(logsDir, `${appName}-err.log`), 0o000);
+      chmodSync(join(logsDir, `${appName}.stdout.log`), 0o000);
+      chmodSync(join(logsDir, `${appName}.stderr.log`), 0o000);
     } catch {
       // Log files may not exist yet, skip test
       return;
@@ -209,8 +209,8 @@ describe('Daemon log resilience', () => {
 
     // Restore permissions for cleanup
     try {
-      chmodSync(join(logsDir, `${appName}-out.log`), 0o644);
-      chmodSync(join(logsDir, `${appName}-err.log`), 0o644);
+      chmodSync(join(logsDir, `${appName}.stdout.log`), 0o644);
+      chmodSync(join(logsDir, `${appName}.stderr.log`), 0o644);
     } catch {
       // Ignore
     }

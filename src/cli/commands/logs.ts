@@ -72,11 +72,11 @@ async function showLogFile(
 
   if (name) {
     if (!errOnly) {
-      const outFile = join(LOGS_DIR, `${name}-out.log`);
+      const outFile = join(LOGS_DIR, `${name}.stdout.log`);
       if (existsSync(outFile)) files.push(outFile);
     }
     if (!outOnly) {
-      const errFile = join(LOGS_DIR, `${name}-err.log`);
+      const errFile = join(LOGS_DIR, `${name}.stderr.log`);
       if (existsSync(errFile)) files.push(errFile);
     }
   } else {
@@ -85,8 +85,9 @@ async function showLogFile(
     const allFiles = readdirSync(LOGS_DIR);
 
     for (const file of allFiles) {
-      if (errOnly && !file.endsWith('-err.log')) continue;
-      if (outOnly && !file.endsWith('-out.log')) continue;
+      if (errOnly && !file.endsWith('.stderr.log')) continue;
+      if (outOnly && !file.endsWith('.stdout.log')) continue;
+      if (!file.endsWith('.stdout.log') && !file.endsWith('.stderr.log')) continue;
       files.push(join(LOGS_DIR, file));
     }
   }
