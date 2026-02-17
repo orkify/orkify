@@ -32,11 +32,25 @@ export function detectBuildCommand(
 
 export function detectEntryPoint(packageJson: Record<string, unknown>, projectDir: string): string {
   if (packageJson.main && typeof packageJson.main === 'string') return packageJson.main;
-  const candidates = ['dist/index.js', 'build/index.js', 'index.js', 'server.js', 'app.js'];
+  const candidates = [
+    'server.mjs',
+    'server.js',
+    'app.mjs',
+    'app.js',
+    'index.mjs',
+    'index.js',
+    'src/server.mjs',
+    'src/server.js',
+    'src/index.mjs',
+    'src/index.js',
+    'dist/server.js',
+    'dist/index.js',
+    'build/index.js',
+  ];
   for (const candidate of candidates) {
     if (existsSync(join(projectDir, candidate))) return candidate;
   }
-  return 'index.js';
+  return 'server.js';
 }
 
 export function readPackageJson(projectDir: string): Record<string, unknown> {
@@ -66,29 +80,35 @@ export function saveOrkifyConfig(projectDir: string, config: SavedState): void {
   writeFileSync(configPath, stringify(config, { defaultStringType: 'QUOTE_DOUBLE' }), 'utf-8');
 }
 
-async function prompt(question: string, defaultValue: string): Promise<string> {
+async function prompt(question: string, prefill: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
-    rl.question(`${question} [${defaultValue}]: `, (answer) => {
+    rl.question(`${question}: `, (answer) => {
       rl.close();
-      resolve(answer.trim() || defaultValue);
+      resolve(answer.trim());
     });
+    rl.write(prefill);
   });
 }
 
 export async function interactiveConfig(projectDir: string): Promise<SavedState> {
-  const pkg = readPackageJson(projectDir);
+  const hasPkg = existsSync(join(projectDir, 'package.json'));
+  const pkg = hasPkg ? readPackageJson(projectDir) : {};
   const pm = detectPackageManager(projectDir);
   const buildCmd = detectBuildCommand(pkg, pm);
   const entry = detectEntryPoint(pkg, projectDir);
 
   console.log('\nConfiguring deployment for this project:\n');
 
-  const install = await prompt('Install command', pm.install);
-  const build = await prompt('Build command (leave empty to skip)', buildCmd || '');
+  const install = await prompt('Install command (empty to skip)', hasPkg ? pm.install : '');
+  const build = await prompt(
+    'Build command (empty to skip)',
+    hasPkg ? buildCmd || `${pm.name} run build` : ''
+  );
   const entryPoint = await prompt('Entry point', entry);
-  const workersStr = await prompt('Number of workers (0 = CPU cores)', '1');
-  const workers = parseInt(workersStr, 10) || 1;
+  const workersStr = await prompt('Workers (0 = max CPU cores, 1 = fork mode)', '0');
+  const parsed = parseInt(workersStr, 10);
+  const workers = Number.isNaN(parsed) ? 0 : parsed;
 
   const deploy: DeploySettings = { install };
   if (build) {
@@ -100,7 +120,7 @@ export async function interactiveConfig(projectDir: string): Promise<SavedState>
     script: entryPoint,
     cwd: projectDir,
     workerCount: workers,
-    execMode: workers > 1 ? 'cluster' : 'fork',
+    execMode: workers === 0 || workers > 1 ? 'cluster' : 'fork',
     watch: false,
     env: {},
     nodeArgs: [],

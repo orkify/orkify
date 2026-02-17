@@ -1,7 +1,8 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createInterface } from 'node:readline';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { ORKIFY_CONFIG_FILE } from '../../src/constants.js';
 import {
   getOrkifyConfig,
@@ -11,8 +12,15 @@ import {
   detectBuildCommand,
   detectEntryPoint,
   collectGitMetadata,
+  interactiveConfig,
 } from '../../src/deploy/config.js';
 import type { SavedState } from '../../src/types/index.js';
+
+vi.mock('node:readline', () => ({
+  createInterface: vi.fn(),
+}));
+
+const mockCreateInterface = createInterface as unknown as Mock;
 
 describe('deploy config', () => {
   let tempDir: string;
@@ -175,8 +183,8 @@ processes:
 
     it('ignores non-string main field', () => {
       const entry = detectEntryPoint({ main: 42 }, tempDir);
-      // Should fall through to candidate detection, default to index.js
-      expect(entry).toBe('index.js');
+      // Should fall through to candidate detection, default to server.js
+      expect(entry).toBe('server.js');
     });
 
     it('finds dist/index.js if it exists', () => {
@@ -192,9 +200,9 @@ processes:
       expect(entry).toBe('server.js');
     });
 
-    it('defaults to index.js', () => {
+    it('defaults to server.js', () => {
       const entry = detectEntryPoint({}, tempDir);
-      expect(entry).toBe('index.js');
+      expect(entry).toBe('server.js');
     });
   });
 
@@ -259,6 +267,88 @@ processes:
       writeFileSync(join(tempDir, ORKIFY_CONFIG_FILE), '', 'utf-8');
       const config = getOrkifyConfig(tempDir);
       expect(config).toBeNull();
+    });
+  });
+
+  describe('interactiveConfig', () => {
+    function setupPromptMock(answers: string[]) {
+      let callIndex = 0;
+      mockCreateInterface.mockReturnValue({
+        question(_q: string, cb: (answer: string) => void) {
+          cb(answers[callIndex++] ?? '');
+        },
+        write() {},
+        close() {},
+      });
+    }
+
+    afterEach(() => {
+      mockCreateInterface.mockReset();
+    });
+
+    it('generates config with package.json and build script', async () => {
+      writeFileSync(
+        join(tempDir, 'package.json'),
+        JSON.stringify({ name: 'test', scripts: { build: 'tsc' } }),
+        'utf-8'
+      );
+      setupPromptMock(['npm ci', 'npm run build', 'server.js', '0']);
+      const result = await interactiveConfig(tempDir);
+      expect(result.version).toBe(1);
+      expect(result.deploy.install).toBe('npm ci');
+      expect(result.deploy.build).toBe('npm run build');
+      expect(result.processes).toHaveLength(1);
+      expect(result.processes[0].script).toBe('server.js');
+      expect(result.processes[0].workerCount).toBe(0);
+      expect(result.processes[0].execMode).toBe('cluster');
+    });
+
+    it('stores workerCount 0 as 0 with cluster mode', async () => {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({ name: 'test' }), 'utf-8');
+      setupPromptMock(['npm ci', '', 'app.js', '0']);
+      const result = await interactiveConfig(tempDir);
+      expect(result.processes[0].workerCount).toBe(0);
+      expect(result.processes[0].execMode).toBe('cluster');
+    });
+
+    it('sets fork mode for workerCount 1', async () => {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({ name: 'test' }), 'utf-8');
+      setupPromptMock(['npm ci', '', 'app.js', '1']);
+      const result = await interactiveConfig(tempDir);
+      expect(result.processes[0].workerCount).toBe(1);
+      expect(result.processes[0].execMode).toBe('fork');
+    });
+
+    it('sets cluster mode for workerCount > 1', async () => {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({ name: 'test' }), 'utf-8');
+      setupPromptMock(['npm ci', '', 'app.js', '4']);
+      const result = await interactiveConfig(tempDir);
+      expect(result.processes[0].workerCount).toBe(4);
+      expect(result.processes[0].execMode).toBe('cluster');
+    });
+
+    it('treats non-numeric workers as 0', async () => {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({ name: 'test' }), 'utf-8');
+      setupPromptMock(['npm ci', '', 'app.js', 'abc']);
+      const result = await interactiveConfig(tempDir);
+      expect(result.processes[0].workerCount).toBe(0);
+      expect(result.processes[0].execMode).toBe('cluster');
+    });
+
+    it('omits deploy.build when build answer is empty', async () => {
+      writeFileSync(join(tempDir, 'package.json'), JSON.stringify({ name: 'test' }), 'utf-8');
+      setupPromptMock(['npm ci', '', 'app.js', '1']);
+      const result = await interactiveConfig(tempDir);
+      expect(result.deploy.build).toBeUndefined();
+    });
+
+    it('works without package.json', async () => {
+      setupPromptMock(['', '', 'index.js', '2']);
+      const result = await interactiveConfig(tempDir);
+      expect(result.deploy.install).toBe('');
+      expect(result.processes[0].script).toBe('index.js');
+      expect(result.processes[0].workerCount).toBe(2);
+      expect(result.processes[0].execMode).toBe('cluster');
     });
   });
 });

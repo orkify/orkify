@@ -54,8 +54,8 @@ curl -X POST http://localhost:3050/api/chaos -H 'Content-Type: application/json'
 ## Deploy workflow
 
 ```bash
-# 1. Upload artifact
-orkify deploy upload --api-key orkify_xxx
+# 1. Upload artifact (from project directory)
+orkify deploy upload ./examples/deploy --api-key orkify_xxx
 
 # 2. Go to dashboard → Deploys → select artifact → Deploy
 

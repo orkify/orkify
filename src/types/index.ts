@@ -55,6 +55,7 @@ export interface ProcessInfo {
   restartedAt?: number;
   watch: boolean;
   sticky: boolean;
+  port?: number;
 }
 
 export interface IPCMessage {
@@ -70,6 +71,8 @@ export interface IPCRequest extends IPCMessage {
     | LogsPayload
     | SnapPayload
     | RestorePayload
+    | DeployRestorePayload
+    | TelemetryConfig
     | ProcessConfig[];
 }
 
@@ -116,6 +119,16 @@ export interface SnapPayload {
 
 export interface RestorePayload {
   file?: string;
+}
+
+export interface DeployRestorePayload {
+  secrets: Record<string, string>;
+  downloadUrl: string;
+  sha256: string;
+  version: number;
+  artifactId: string;
+  sizeBytes: number;
+  deployConfig: DeploySettings;
 }
 
 export interface SavedState {
@@ -296,6 +309,7 @@ export interface DeployOptions {
   skipBuild?: boolean;
   skipMonitor?: boolean;
   skipTelemetry?: boolean;
+  deploysDir?: string;
 }
 
 export interface ReconcileResult {

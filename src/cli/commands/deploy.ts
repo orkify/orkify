@@ -9,7 +9,6 @@ import {
   rmSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -31,16 +30,18 @@ import type { DeployLocalPayload } from '../../types/index.js';
 export const deployCommand = new Command('deploy').description('Deployment commands');
 
 deployCommand
-  .command('upload')
-  .description('Upload a build artifact for deployment')
-  .option('--project-dir <path>', 'Project directory', process.cwd())
+  .command('upload [dir]')
+  .description('Upload a build artifact for deployment (default: current directory)')
   .option('--interactive', 'Force interactive config prompts')
   .option('--api-key <key>', 'API key (or ORKIFY_API_KEY env)')
   .option('--api-host <url>', 'API host (or ORKIFY_API_HOST env)')
-  .option('--npm-version-patch', 'Increment patch version in package.json before uploading')
-  .action(async (options) => {
+  .option(
+    '--npm-version-patch',
+    'Bump package.json patch version before upload (e.g. 1.0.0 → 1.0.1)'
+  )
+  .action(async (dir: string | undefined, options) => {
     try {
-      const projectDir = resolve(options.projectDir);
+      const projectDir = resolve(dir ?? process.cwd());
       const apiKey = options.apiKey || process.env.ORKIFY_API_KEY;
       const apiHost = options.apiHost || process.env.ORKIFY_API_HOST || TELEMETRY_DEFAULT_API_HOST;
 
@@ -79,14 +80,10 @@ deployCommand
 
       // 2. Bump patch version if requested
       if (options.npmVersionPatch) {
-        const pkgPath = join(projectDir, 'package.json');
-        const pkg = readPackageJson(projectDir);
-        const current = (pkg.version as string) || '0.0.0';
-        const parts = current.split('.').map(Number);
-        parts[2] = (parts[2] ?? 0) + 1;
-        pkg.version = parts.join('.');
-        writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
-        console.log(chalk.dim(`  version: ${current} → ${pkg.version}`));
+        const current = (readPackageJson(projectDir).version as string) || '0.0.0';
+        execSync('npm version patch --no-git-tag-version', { cwd: projectDir, stdio: 'pipe' });
+        const bumped = (readPackageJson(projectDir).version as string) || current;
+        console.log(chalk.dim(`  version: ${current} → ${bumped}`));
       }
 
       // 3. Collect git metadata

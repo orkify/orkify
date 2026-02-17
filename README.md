@@ -67,7 +67,7 @@ orkify run app.js -w 4
 | `orkify daemon-reload`           | Reload daemon code (snap → kill → restore)    |
 | `orkify deploy pack [dir]`       | Create a deploy tarball                       |
 | `orkify deploy local <tarball>`  | Deploy from a local tarball                   |
-| `orkify deploy upload`           | Upload a build artifact for deployment        |
+| `orkify deploy upload [dir]`     | Upload a build artifact for deployment        |
 | `orkify mcp`                     | Start MCP server for AI tools                 |
 
 ## MCP Integration
@@ -134,10 +134,13 @@ orkify includes built-in deployment with automatic rollback. Create a tarball of
 # First time: configure deploy settings (saved to orkify.yml)
 orkify deploy upload --interactive
 
-# Upload an artifact
+# Upload an artifact (defaults to current directory)
 orkify deploy upload
 
-# Bump version and upload in one step
+# Upload from a specific directory
+orkify deploy upload ./myapp
+
+# Bump package.json patch version and upload (e.g. 1.0.0 → 1.0.1)
 orkify deploy upload --npm-version-patch
 ```
 
@@ -361,6 +364,49 @@ processes:
 ```
 
 All string values are double-quoted in the generated file to prevent YAML type coercion (e.g. `"3000"` stays a string, not an integer). If you hand-edit the file, unquoted env values like `PORT: 3000` or `DEBUG: true` are automatically coerced back to strings when loaded. Quoting is still recommended to avoid surprises (e.g. `1.0` parses as `1`).
+
+## Boot Persistence
+
+To automatically restore processes after a server reboot, use the provided systemd service template.
+
+```bash
+# Find your orkify binary path
+which orkify
+
+# Copy the template unit (shipped with the npm package)
+sudo cp $(npm root -g)/orkify/boot/systemd/orkify@.service /etc/systemd/system/
+
+# If your orkify binary is not at /usr/local/bin/orkify, edit the unit file:
+#   sudo systemctl edit orkify@  →  override ExecStart/ExecStop paths
+
+# Enable for your user
+sudo systemctl daemon-reload
+sudo systemctl enable orkify@$(whoami)
+```
+
+The `@` template runs as the user you specify after the `@`. Replace `$(whoami)` with any username:
+
+```bash
+# Run as the "deploy" user
+sudo systemctl enable orkify@deploy
+
+# Run as "app"
+sudo systemctl enable orkify@app
+```
+
+On boot the service calls `orkify restore` to bring back all snapshotted processes, and `orkify kill` on stop. Each user has their own isolated process list under `~/.orkify/`.
+
+Make sure to snapshot your processes so there is something to restore:
+
+```bash
+orkify snap
+```
+
+To start immediately without rebooting:
+
+```bash
+sudo systemctl start orkify@$(whoami)
+```
 
 ## Cluster Mode
 

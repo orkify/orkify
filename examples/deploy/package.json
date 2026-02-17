@@ -1,6 +1,6 @@
 {
   "name": "deploy-example",
-  "version": "1.0.4",
+  "version": "1.0.10",
   "private": true,
   "type": "module",
   "scripts": {
@@ -20,15 +20,5 @@
     "@types/react-dom": "^19.1.5",
     "tailwindcss": "^4.1.8",
     "typescript": "^5.8.3"
-  },
-  "orkify": {
-    "deploy": {
-      "install": "npm ci",
-      "build": "npm run build",
-      "entry": "server.mjs",
-      "workers": 0,
-      "healthCheck": "/api/health",
-      "crashWindow": 15
-    }
   }
 }

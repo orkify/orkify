@@ -46,3 +46,4 @@ Thumbs.db
 
 # ORKIFY runtime files (user home directory)
 # These are created at ~/.orkify/ but listed here for reference
+orkify.yml

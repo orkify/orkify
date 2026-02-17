@@ -62,6 +62,7 @@ export class ManagedProcess extends EventEmitter {
   private forkCreatedAt = 0;
   private forkReady = false;
   private forkLaunchTimer: NodeJS.Timeout | null = null;
+  private detectedPort: number | undefined;
   private primaryRestarts = 0;
   private forkStats = {
     memory: 0,
@@ -356,6 +357,10 @@ export class ManagedProcess extends EventEmitter {
 
         case 'worker:listening': {
           const listeningWorkerId = msg.workerId as number;
+          const addr = msg.address as { port?: number } | undefined;
+          if (addr?.port && !this.detectedPort) {
+            this.detectedPort = addr.port;
+          }
           this.clearLaunchTimer(listeningWorkerId);
           this.updateWorkerState(listeningWorkerId, { ready: true, status: ProcessStatus.ONLINE });
           this.emit('worker:ready', listeningWorkerId);
@@ -416,6 +421,15 @@ export class ManagedProcess extends EventEmitter {
             worker.eventLoopLag = metricsData.eventLoopLag ?? 0;
             worker.eventLoopLagP95 = metricsData.eventLoopLagP95 ?? 0;
             worker.activeHandles = metricsData.activeHandles ?? 0;
+
+            // Recover from launch timeout: if a worker is sending metrics,
+            // it's alive and its event loop is responsive. The 30s launch
+            // timeout already fired but the process didn't crash — it just
+            // took longer than expected to start (e.g. Next.js compilation).
+            if (worker.status === ProcessStatus.ERRORED) {
+              worker.status = ProcessStatus.ONLINE;
+              worker.ready = true;
+            }
           }
           break;
         }
@@ -865,6 +879,7 @@ export class ManagedProcess extends EventEmitter {
       createdAt: workers[0]?.createdAt || Date.now(),
       watch: this.config.watch,
       sticky: this.config.sticky,
+      port: this.config.port ?? this.detectedPort,
     };
   }
 

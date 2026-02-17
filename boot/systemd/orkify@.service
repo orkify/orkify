@@ -1,0 +1,28 @@
+# orkify process manager — systemd template unit
+#
+# Install:
+#   sudo cp orkify@.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable orkify@<username>
+#
+# The service restores the process snapshot on boot and kills the daemon on stop.
+# Make sure to run `orkify snap` at least once so there is a snapshot to restore.
+#
+# Update ExecStart/ExecStop paths to match your installation:
+#   which orkify
+
+[Unit]
+Description=orkify process manager (%i)
+Documentation=https://github.com/orkify/orkify
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=%i
+ExecStart=/usr/local/bin/orkify restore
+ExecStop=/usr/local/bin/orkify kill
+
+[Install]
+WantedBy=multi-user.target

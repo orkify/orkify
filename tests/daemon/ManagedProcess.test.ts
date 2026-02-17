@@ -335,4 +335,212 @@ describe('ManagedProcess', () => {
       internal.isShuttingDown = true;
     });
   });
+
+  describe('cluster mode metrics-based status recovery', () => {
+    function createClusterContainer() {
+      const container = new ManagedProcess(
+        0,
+        createConfig({ workerCount: 2, execMode: ExecMode.CLUSTER })
+      );
+
+      const mockPrimary = Object.assign(new EventEmitter(), {
+        connected: true,
+        pid: 9999,
+        stdout: null,
+        stderr: null,
+        send: () => true,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+      internal.clusterPrimary = mockPrimary;
+      internal.setupClusterHandlers(mockPrimary);
+
+      return { container, mockPrimary, internal };
+    }
+
+    it('recovers ERRORED worker to ONLINE on metrics', () => {
+      const { container, mockPrimary, internal } = createClusterContainer();
+
+      // Worker comes online → LAUNCHING
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+
+      const workerState = internal.clusterWorkers.get(0);
+      expect(workerState.status).toBe(ProcessStatus.LAUNCHING);
+
+      // Simulate launch timeout firing (set ERRORED directly)
+      workerState.status = ProcessStatus.ERRORED;
+      workerState.ready = false;
+
+      expect(container.getInfo().workers[0].status).toBe(ProcessStatus.ERRORED);
+
+      // Metrics arrive from the probe → should recover to ONLINE
+      mockPrimary.emit('message', {
+        type: 'worker:metrics',
+        workerId: 0,
+        data: {
+          heapUsed: 1000,
+          heapTotal: 2000,
+          external: 0,
+          arrayBuffers: 0,
+          eventLoopLag: 1,
+          eventLoopLagP95: 2,
+          activeHandles: 3,
+        },
+      });
+
+      expect(workerState.status).toBe(ProcessStatus.ONLINE);
+      expect(workerState.ready).toBe(true);
+      expect(container.getInfo().workers[0].status).toBe(ProcessStatus.ONLINE);
+
+      internal.isShuttingDown = true;
+    });
+
+    it('does NOT recover LAUNCHING worker on metrics', () => {
+      const { mockPrimary, internal } = createClusterContainer();
+
+      // Worker comes online → LAUNCHING
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+
+      const workerState = internal.clusterWorkers.get(0);
+      expect(workerState.status).toBe(ProcessStatus.LAUNCHING);
+
+      // Metrics arrive while still LAUNCHING — should stay LAUNCHING
+      mockPrimary.emit('message', {
+        type: 'worker:metrics',
+        workerId: 0,
+        data: {
+          heapUsed: 1000,
+          heapTotal: 2000,
+          external: 0,
+          arrayBuffers: 0,
+          eventLoopLag: 1,
+          eventLoopLagP95: 2,
+          activeHandles: 3,
+        },
+      });
+
+      expect(workerState.status).toBe(ProcessStatus.LAUNCHING);
+
+      internal.isShuttingDown = true;
+    });
+
+    it('does NOT recover STOPPED worker on metrics', () => {
+      const { mockPrimary, internal } = createClusterContainer();
+
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+
+      const workerState = internal.clusterWorkers.get(0);
+      workerState.status = ProcessStatus.STOPPED;
+
+      mockPrimary.emit('message', {
+        type: 'worker:metrics',
+        workerId: 0,
+        data: {
+          heapUsed: 1000,
+          heapTotal: 2000,
+          external: 0,
+          arrayBuffers: 0,
+          eventLoopLag: 1,
+          eventLoopLagP95: 2,
+          activeHandles: 3,
+        },
+      });
+
+      expect(workerState.status).toBe(ProcessStatus.STOPPED);
+
+      internal.isShuttingDown = true;
+    });
+
+    it('worker:listening recovers ERRORED status', () => {
+      const { container, mockPrimary, internal } = createClusterContainer();
+
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+
+      const workerState = internal.clusterWorkers.get(0);
+      workerState.status = ProcessStatus.ERRORED;
+      workerState.ready = false;
+
+      // Late listening signal arrives
+      mockPrimary.emit('message', {
+        type: 'worker:listening',
+        workerId: 0,
+        address: { address: '*', port: 3000 },
+      });
+
+      expect(workerState.status).toBe(ProcessStatus.ONLINE);
+      expect(workerState.ready).toBe(true);
+      expect(container.getInfo().status).toBe(ProcessStatus.ONLINE);
+
+      internal.isShuttingDown = true;
+    });
+
+    it('process status reflects worst worker status', () => {
+      const { container, mockPrimary, internal } = createClusterContainer();
+
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 1, pid: 5678 });
+
+      // Worker 0: ONLINE, Worker 1: ERRORED → process should be ERRORED
+      mockPrimary.emit('message', {
+        type: 'worker:listening',
+        workerId: 0,
+        address: { address: '*', port: 3000 },
+      });
+      const worker1 = internal.clusterWorkers.get(1);
+      worker1.status = ProcessStatus.ERRORED;
+
+      expect(container.getInfo().status).toBe(ProcessStatus.ERRORED);
+
+      // Worker 1 recovers via metrics → both ONLINE → process ONLINE
+      mockPrimary.emit('message', {
+        type: 'worker:metrics',
+        workerId: 1,
+        data: {
+          heapUsed: 1000,
+          heapTotal: 2000,
+          external: 0,
+          arrayBuffers: 0,
+          eventLoopLag: 1,
+          eventLoopLagP95: 2,
+          activeHandles: 3,
+        },
+      });
+
+      expect(container.getInfo().status).toBe(ProcessStatus.ONLINE);
+
+      internal.isShuttingDown = true;
+    });
+
+    it('updates metrics fields on worker state', () => {
+      const { mockPrimary, internal } = createClusterContainer();
+
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+
+      mockPrimary.emit('message', {
+        type: 'worker:metrics',
+        workerId: 0,
+        data: {
+          heapUsed: 5000,
+          heapTotal: 10000,
+          external: 200,
+          arrayBuffers: 100,
+          eventLoopLag: 3.5,
+          eventLoopLagP95: 8.2,
+          activeHandles: 12,
+        },
+      });
+
+      const workerState = internal.clusterWorkers.get(0);
+      expect(workerState.heapUsed).toBe(5000);
+      expect(workerState.heapTotal).toBe(10000);
+      expect(workerState.external).toBe(200);
+      expect(workerState.arrayBuffers).toBe(100);
+      expect(workerState.eventLoopLag).toBe(3.5);
+      expect(workerState.eventLoopLagP95).toBe(8.2);
+      expect(workerState.activeHandles).toBe(12);
+
+      internal.isShuttingDown = true;
+    });
+  });
 });

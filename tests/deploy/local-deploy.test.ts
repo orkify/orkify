@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
+  readFileSync,
   readlinkSync,
   readdirSync,
   rmSync,
@@ -13,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ORKIFY_CONFIG_FILE, ORKIFY_DEPLOYS_DIR } from '../../src/constants.js';
+import { ORKIFY_CONFIG_FILE, DEPLOY_META_FILE } from '../../src/constants.js';
 import { getOrkifyConfig } from '../../src/deploy/config.js';
 import { DeployExecutor } from '../../src/deploy/DeployExecutor.js';
 import { parseEnvFile } from '../../src/deploy/env.js';
@@ -219,7 +220,6 @@ describe('deploy local', () => {
 
 describe('DeployExecutor.execute() — local deploy', () => {
   let tempDir: string;
-  const deployDirs: string[] = [];
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'orkify-executor-test-'));
@@ -227,11 +227,6 @@ describe('DeployExecutor.execute() — local deploy', () => {
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
-    // Clean up any deploy dirs created under ~/.orkify/deploys/
-    for (const dir of deployDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    deployDirs.length = 0;
   });
 
   function createMockOrchestrator(reconcileResult?: ReconcileResult) {
@@ -249,12 +244,11 @@ describe('DeployExecutor.execute() — local deploy', () => {
   }
 
   function makeCmd(overrides?: Partial<DeployCommand>): DeployCommand {
-    const artifactId = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     return {
       type: 'deploy',
       deployId: 'local-test',
       targetId: 'local',
-      artifactId,
+      artifactId: 'test',
       version: 1,
       sha256: '',
       sizeBytes: 0,
@@ -281,6 +275,7 @@ describe('DeployExecutor.execute() — local deploy', () => {
     const orchestrator = createMockOrchestrator();
     const telemetry = createStubTelemetry();
 
+    const deploysDir = join(tempDir, 'deploys');
     const cmd = makeCmd();
     const options: DeployOptions = {
       localTarball: tarPath,
@@ -288,10 +283,8 @@ describe('DeployExecutor.execute() — local deploy', () => {
       skipInstall: true,
       skipTelemetry: true,
       skipMonitor: true,
+      deploysDir,
     };
-
-    const projectDeployDir = join(ORKIFY_DEPLOYS_DIR, cmd.artifactId.slice(0, 8));
-    deployDirs.push(projectDeployDir);
 
     const executor = new DeployExecutor(
       { apiKey: '', apiHost: '' },
@@ -312,17 +305,26 @@ describe('DeployExecutor.execute() — local deploy', () => {
     expect(configs).toHaveLength(1);
     expect(configs[0].name).toBe('app');
 
-    const currentLink = join(projectDeployDir, 'current');
+    const currentLink = join(deploysDir, 'current');
 
     // Verify current symlink exists
     expect(existsSync(currentLink)).toBe(true);
     const linkTarget = readlinkSync(currentLink);
-    expect(linkTarget).toContain(`v${cmd.version}`);
+    expect(linkTarget).toContain(`local-${cmd.version}`);
 
     // Verify extracted files exist
-    const releaseDir = join(projectDeployDir, 'releases', `v${cmd.version}`);
+    const releaseDir = join(deploysDir, 'releases', `local-${cmd.version}`);
     expect(existsSync(join(releaseDir, ORKIFY_CONFIG_FILE))).toBe(true);
     expect(existsSync(join(releaseDir, 'index.js'))).toBe(true);
+
+    // Deploy metadata should be written
+    const meta = JSON.parse(readFileSync(join(releaseDir, DEPLOY_META_FILE), 'utf-8'));
+    expect(meta.version).toBe(cmd.version);
+    expect(meta.artifactId).toBe(cmd.artifactId);
+
+    // Metadata should also be readable via the current symlink
+    const metaViaCurrent = JSON.parse(readFileSync(join(currentLink, DEPLOY_META_FILE), 'utf-8'));
+    expect(metaViaCurrent.version).toBe(cmd.version);
 
     // Script path should be resolved relative to currentLink
     expect(configs[0].script).toBe(join(currentLink, 'index.js'));
@@ -344,6 +346,7 @@ describe('DeployExecutor.execute() — local deploy', () => {
     const telemetry = createStubTelemetry();
     const logSpy = vi.spyOn(console, 'log');
 
+    const deploysDir = join(tempDir, 'deploys');
     const cmd = makeCmd();
     const options: DeployOptions = {
       localTarball: tarPath,
@@ -351,10 +354,8 @@ describe('DeployExecutor.execute() — local deploy', () => {
       skipInstall: true,
       skipTelemetry: true,
       skipMonitor: true,
+      deploysDir,
     };
-
-    const projectDeployDir = join(ORKIFY_DEPLOYS_DIR, cmd.artifactId.slice(0, 8));
-    deployDirs.push(projectDeployDir);
 
     const executor = new DeployExecutor(
       { apiKey: '', apiHost: '' },
@@ -448,20 +449,15 @@ KEY2=value2
   });
 });
 
-describe('DeployExecutor — verifySha256', () => {
+describe('DeployExecutor — runtime NODE_ENV default', () => {
   let tempDir: string;
-  const deployDirs: string[] = [];
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'orkify-sha-test-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'orkify-nodeenv-test-'));
   });
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
-    for (const dir of deployDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    deployDirs.length = 0;
   });
 
   function createMockOrchestrator(reconcileResult?: ReconcileResult) {
@@ -479,12 +475,324 @@ describe('DeployExecutor — verifySha256', () => {
   }
 
   function makeCmd(overrides?: Partial<DeployCommand>): DeployCommand {
-    const artifactId = `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     return {
       type: 'deploy',
       deployId: 'local-test',
       targetId: 'local',
-      artifactId,
+      artifactId: 'test',
+      version: 1,
+      sha256: '',
+      sizeBytes: 0,
+      downloadToken: '',
+      downloadUrl: '',
+      deployConfig: { install: 'echo ok' },
+      ...overrides,
+    };
+  }
+
+  it('passes NODE_ENV=production to orchestrator.reconcile by default', async () => {
+    const projectDir = join(tempDir, 'project');
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, 'package.json'), JSON.stringify({ name: 'test' }));
+    writeFileSync(join(projectDir, 'index.js'), 'console.log("hi");');
+    writeFileSync(join(projectDir, ORKIFY_CONFIG_FILE), ORKIFY_YML_MINIMAL);
+    const tarPath = await createTarball(projectDir);
+
+    const orchestrator = createMockOrchestrator();
+    const telemetry = createStubTelemetry();
+
+    const deploysDir = join(tempDir, 'deploys');
+    const executor = new DeployExecutor(
+      { apiKey: '', apiHost: '' },
+      orchestrator as never,
+      telemetry as never,
+      makeCmd(),
+      {
+        localTarball: tarPath,
+        secrets: {},
+        skipInstall: true,
+        skipTelemetry: true,
+        skipMonitor: true,
+        deploysDir,
+      }
+    );
+
+    await executor.execute();
+
+    expect(orchestrator.reconcile).toHaveBeenCalledOnce();
+    const runtimeEnv = orchestrator.reconcile.mock.calls[0][1];
+    expect(runtimeEnv.NODE_ENV).toBe('production');
+
+    rmSync(tarPath);
+  });
+
+  it('user secrets override NODE_ENV default', async () => {
+    const projectDir = join(tempDir, 'project');
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, 'package.json'), JSON.stringify({ name: 'test' }));
+    writeFileSync(join(projectDir, 'index.js'), 'console.log("hi");');
+    writeFileSync(join(projectDir, ORKIFY_CONFIG_FILE), ORKIFY_YML_MINIMAL);
+    const tarPath = await createTarball(projectDir);
+
+    const orchestrator = createMockOrchestrator();
+    const telemetry = createStubTelemetry();
+
+    const deploysDir = join(tempDir, 'deploys');
+    const executor = new DeployExecutor(
+      { apiKey: '', apiHost: '' },
+      orchestrator as never,
+      telemetry as never,
+      makeCmd(),
+      {
+        localTarball: tarPath,
+        secrets: { NODE_ENV: 'staging' },
+        skipInstall: true,
+        skipTelemetry: true,
+        skipMonitor: true,
+        deploysDir,
+      }
+    );
+
+    await executor.execute();
+
+    expect(orchestrator.reconcile).toHaveBeenCalledOnce();
+    const runtimeEnv = orchestrator.reconcile.mock.calls[0][1];
+    expect(runtimeEnv.NODE_ENV).toBe('staging');
+
+    rmSync(tarPath);
+  });
+
+  it('passes additional secrets alongside NODE_ENV', async () => {
+    const projectDir = join(tempDir, 'project');
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, 'package.json'), JSON.stringify({ name: 'test' }));
+    writeFileSync(join(projectDir, 'index.js'), 'console.log("hi");');
+    writeFileSync(join(projectDir, ORKIFY_CONFIG_FILE), ORKIFY_YML_MINIMAL);
+    const tarPath = await createTarball(projectDir);
+
+    const orchestrator = createMockOrchestrator();
+    const telemetry = createStubTelemetry();
+
+    const deploysDir = join(tempDir, 'deploys');
+    const executor = new DeployExecutor(
+      { apiKey: '', apiHost: '' },
+      orchestrator as never,
+      telemetry as never,
+      makeCmd(),
+      {
+        localTarball: tarPath,
+        secrets: { DATABASE_URL: 'postgres://localhost/db', API_KEY: 'secret123' },
+        skipInstall: true,
+        skipTelemetry: true,
+        skipMonitor: true,
+        deploysDir,
+      }
+    );
+
+    await executor.execute();
+
+    const runtimeEnv = orchestrator.reconcile.mock.calls[0][1];
+    expect(runtimeEnv.NODE_ENV).toBe('production');
+    expect(runtimeEnv.DATABASE_URL).toBe('postgres://localhost/db');
+    expect(runtimeEnv.API_KEY).toBe('secret123');
+
+    rmSync(tarPath);
+  });
+
+  it('strips NODE_ENV from build phase env', async () => {
+    const projectDir = join(tempDir, 'project');
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, 'package.json'), JSON.stringify({ name: 'test' }));
+    writeFileSync(join(projectDir, 'index.js'), 'console.log("hi");');
+    writeFileSync(join(projectDir, ORKIFY_CONFIG_FILE), ORKIFY_YML_MINIMAL);
+    const tarPath = await createTarball(projectDir);
+
+    const orchestrator = createMockOrchestrator();
+    const telemetry = createStubTelemetry();
+
+    // Use an install command that prints NODE_ENV so we can verify it's unset
+    const deploysDir = join(tempDir, 'deploys');
+    const executor = new DeployExecutor(
+      { apiKey: '', apiHost: '' },
+      orchestrator as never,
+      telemetry as never,
+      makeCmd({ deployConfig: { install: 'echo "NODE_ENV=$NODE_ENV"' } }),
+      {
+        localTarball: tarPath,
+        secrets: { NODE_ENV: 'production' },
+        skipInstall: false,
+        skipTelemetry: true,
+        skipMonitor: true,
+        deploysDir,
+      }
+    );
+
+    await executor.execute();
+
+    // Deploy should succeed (install command runs without NODE_ENV being inherited from parent)
+    expect(orchestrator.reconcile).toHaveBeenCalledOnce();
+
+    rmSync(tarPath);
+  });
+});
+
+describe('DeployExecutor — telemetry lifecycle events', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orkify-telemetry-events-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function createMockOrchestrator(reconcileResult?: ReconcileResult) {
+    const emitter = new EventEmitter();
+    const result = reconcileResult ?? { started: ['app'], reloaded: [], deleted: [] };
+    const reconcile = vi.fn().mockResolvedValue(result);
+    return Object.assign(emitter, { reconcile });
+  }
+
+  function createStubTelemetry() {
+    return {
+      setDeployStatus: vi.fn(),
+      emitEvent: vi.fn(),
+    };
+  }
+
+  function makeCmd(overrides?: Partial<DeployCommand>): DeployCommand {
+    return {
+      type: 'deploy',
+      deployId: 'deploy-42',
+      targetId: 'target-1',
+      artifactId: 'test',
+      version: 1,
+      sha256: '',
+      sizeBytes: 0,
+      downloadToken: '',
+      downloadUrl: '',
+      deployConfig: { install: 'echo ok' },
+      ...overrides,
+    };
+  }
+
+  it('emits deploy-started and deploy-finished on success', async () => {
+    const projectDir = join(tempDir, 'project');
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, 'package.json'), JSON.stringify({ name: 'test' }));
+    writeFileSync(join(projectDir, 'index.js'), 'console.log("hi");');
+    writeFileSync(join(projectDir, ORKIFY_CONFIG_FILE), ORKIFY_YML_MINIMAL);
+    const tarPath = await createTarball(projectDir);
+
+    const orchestrator = createMockOrchestrator();
+    const telemetry = createStubTelemetry();
+    const deploysDir = join(tempDir, 'deploys');
+
+    const executor = new DeployExecutor(
+      { apiKey: '', apiHost: '' },
+      orchestrator as never,
+      telemetry as never,
+      makeCmd(),
+      {
+        localTarball: tarPath,
+        secrets: {},
+        skipInstall: true,
+        skipTelemetry: false,
+        skipMonitor: true,
+        deploysDir,
+      }
+    );
+
+    await executor.execute();
+
+    const eventCalls = telemetry.emitEvent.mock.calls.map(
+      (args: [string, string, Record<string, unknown>]) => args[0]
+    );
+    expect(eventCalls).toContain('process:deploy-started');
+    expect(eventCalls).toContain('process:deploy-finished');
+    expect(eventCalls).not.toContain('process:deploy-failed');
+
+    // Verify deploy status was reported
+    expect(telemetry.setDeployStatus).toHaveBeenCalled();
+    const lastStatus = telemetry.setDeployStatus.mock.calls.at(-1)?.[0];
+    expect(lastStatus.phase).toBe('success');
+    expect(lastStatus.deployId).toBe('deploy-42');
+
+    rmSync(tarPath);
+  });
+
+  it('emits deploy-failed on error', async () => {
+    const projectDir = join(tempDir, 'project');
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, 'package.json'), JSON.stringify({ name: 'test' }));
+    writeFileSync(join(projectDir, 'index.js'), 'console.log("hi");');
+    writeFileSync(join(projectDir, ORKIFY_CONFIG_FILE), ORKIFY_YML_MINIMAL);
+    const tarPath = await createTarball(projectDir);
+
+    const orchestrator = createMockOrchestrator();
+    const telemetry = createStubTelemetry();
+    const deploysDir = join(tempDir, 'deploys');
+
+    const executor = new DeployExecutor(
+      { apiKey: '', apiHost: '' },
+      orchestrator as never,
+      telemetry as never,
+      makeCmd({ deployConfig: { install: 'exit 1' } }),
+      {
+        localTarball: tarPath,
+        secrets: {},
+        skipInstall: false,
+        skipTelemetry: false,
+        skipMonitor: true,
+        deploysDir,
+      }
+    );
+
+    await executor.execute();
+
+    const eventCalls = telemetry.emitEvent.mock.calls.map(
+      (args: [string, string, Record<string, unknown>]) => args[0]
+    );
+    expect(eventCalls).toContain('process:deploy-started');
+    expect(eventCalls).toContain('process:deploy-failed');
+    expect(eventCalls).not.toContain('process:deploy-finished');
+
+    rmSync(tarPath);
+  });
+});
+
+describe('DeployExecutor — verifySha256', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orkify-sha-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function createMockOrchestrator(reconcileResult?: ReconcileResult) {
+    const emitter = new EventEmitter();
+    const result = reconcileResult ?? { started: ['app'], reloaded: [], deleted: [] };
+    const reconcile = vi.fn().mockResolvedValue(result);
+    return Object.assign(emitter, { reconcile });
+  }
+
+  function createStubTelemetry() {
+    return {
+      setDeployStatus: vi.fn(),
+      emitEvent: vi.fn(),
+    };
+  }
+
+  function makeCmd(overrides?: Partial<DeployCommand>): DeployCommand {
+    return {
+      type: 'deploy',
+      deployId: 'local-test',
+      targetId: 'local',
+      artifactId: 'test',
       version: 1,
       sha256: 'badhash',
       sizeBytes: 0,
@@ -512,6 +820,7 @@ describe('DeployExecutor — verifySha256', () => {
     // Instead, test via the local path but without setting localTarball — that triggers download.
     // Actually, verifySha256 is only called for remote deploys. Let's test the cleanup flow instead.
     // Test: runCommand failure causes deploy failure
+    const deploysDir = join(tempDir, 'deploys');
     const cmd = makeCmd();
     const options: DeployOptions = {
       localTarball: tarPath,
@@ -519,10 +828,8 @@ describe('DeployExecutor — verifySha256', () => {
       skipInstall: false, // Run install command
       skipTelemetry: true,
       skipMonitor: true,
+      deploysDir,
     };
-
-    const projectDeployDir = join(ORKIFY_DEPLOYS_DIR, cmd.artifactId.slice(0, 8));
-    deployDirs.push(projectDeployDir);
 
     const executor = new DeployExecutor(
       { apiKey: '', apiHost: '' },
@@ -545,7 +852,6 @@ describe('DeployExecutor — verifySha256', () => {
 
 describe('DeployExecutor — monitorCrashWindow', () => {
   let tempDir: string;
-  const deployDirs: string[] = [];
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'orkify-monitor-test-'));
@@ -553,10 +859,6 @@ describe('DeployExecutor — monitorCrashWindow', () => {
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
-    for (const dir of deployDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    deployDirs.length = 0;
   });
 
   function createMockOrchestrator(reconcileResult?: ReconcileResult) {
@@ -574,12 +876,11 @@ describe('DeployExecutor — monitorCrashWindow', () => {
   }
 
   function makeCmd(overrides?: Partial<DeployCommand>): DeployCommand {
-    const artifactId = `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     return {
       type: 'deploy',
       deployId: 'local-test',
       targetId: 'local',
-      artifactId,
+      artifactId: 'test',
       version: 1,
       sha256: '',
       sizeBytes: 0,
@@ -602,6 +903,7 @@ describe('DeployExecutor — monitorCrashWindow', () => {
     const telemetry = createStubTelemetry();
     const logSpy = vi.spyOn(console, 'log');
 
+    const deploysDir = join(tempDir, 'deploys');
     const cmd = makeCmd();
     const options: DeployOptions = {
       localTarball: tarPath,
@@ -609,10 +911,8 @@ describe('DeployExecutor — monitorCrashWindow', () => {
       skipInstall: true,
       skipTelemetry: true,
       skipMonitor: false,
+      deploysDir,
     };
-
-    const projectDeployDir = join(ORKIFY_DEPLOYS_DIR, cmd.artifactId.slice(0, 8));
-    deployDirs.push(projectDeployDir);
 
     const executor = new DeployExecutor(
       { apiKey: '', apiHost: '' },
@@ -643,6 +943,7 @@ describe('DeployExecutor — monitorCrashWindow', () => {
     const telemetry = createStubTelemetry();
     const logSpy = vi.spyOn(console, 'log');
 
+    const deploysDir = join(tempDir, 'deploys');
     const cmd = makeCmd({ deployConfig: { install: 'echo ok', crashWindow: 5 } });
     const options: DeployOptions = {
       localTarball: tarPath,
@@ -650,10 +951,8 @@ describe('DeployExecutor — monitorCrashWindow', () => {
       skipInstall: true,
       skipTelemetry: true,
       skipMonitor: false,
+      deploysDir,
     };
-
-    const projectDeployDir = join(ORKIFY_DEPLOYS_DIR, cmd.artifactId.slice(0, 8));
-    deployDirs.push(projectDeployDir);
 
     const executor = new DeployExecutor(
       { apiKey: '', apiHost: '' },
@@ -683,7 +982,6 @@ describe('DeployExecutor — monitorCrashWindow', () => {
 
 describe('DeployExecutor — cleanupOldReleases', () => {
   let tempDir: string;
-  const deployDirs: string[] = [];
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'orkify-cleanup-test-'));
@@ -691,10 +989,6 @@ describe('DeployExecutor — cleanupOldReleases', () => {
 
   afterEach(() => {
     rmSync(tempDir, { recursive: true, force: true });
-    for (const dir of deployDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    deployDirs.length = 0;
   });
 
   function createMockOrchestrator() {
@@ -721,18 +1015,14 @@ describe('DeployExecutor — cleanupOldReleases', () => {
 
     const orchestrator = createMockOrchestrator();
     const telemetry = createStubTelemetry();
-
-    // Run multiple deploys with incrementing versions to create old releases
-    const artifactId = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    const projectDeployDir = join(ORKIFY_DEPLOYS_DIR, artifactId.slice(0, 8));
-    deployDirs.push(projectDeployDir);
+    const deploysDir = join(tempDir, 'deploys');
 
     for (let version = 1; version <= 5; version++) {
       const cmd: DeployCommand = {
         type: 'deploy',
         deployId: 'local-test',
         targetId: 'local',
-        artifactId,
+        artifactId: 'test',
         version,
         sha256: '',
         sizeBytes: 0,
@@ -747,6 +1037,7 @@ describe('DeployExecutor — cleanupOldReleases', () => {
         skipInstall: true,
         skipTelemetry: true,
         skipMonitor: true,
+        deploysDir,
       };
 
       const executor = new DeployExecutor(
@@ -761,17 +1052,15 @@ describe('DeployExecutor — cleanupOldReleases', () => {
     }
 
     // Check which releases remain
-    const releasesDir = join(projectDeployDir, 'releases');
+    const releasesDir = join(deploysDir, 'releases');
     const remaining = existsSync(releasesDir)
-      ? readdirSync(releasesDir).filter(
-          (e) => e.startsWith('v') && statSync(join(releasesDir, e)).isDirectory()
-        )
+      ? readdirSync(releasesDir).filter((e) => statSync(join(releasesDir, e)).isDirectory())
       : [];
 
     // Should keep at most 3 + the preserved previous (4 max)
     expect(remaining.length).toBeLessThanOrEqual(4);
     // Latest version should always exist
-    expect(remaining).toContain('v5');
+    expect(remaining).toContain('local-5');
 
     rmSync(tarPath);
   });

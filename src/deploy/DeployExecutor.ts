@@ -13,11 +13,12 @@ import {
   statSync,
   symlinkSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { ORKIFY_DEPLOYS_DIR, DEPLOY_CRASH_WINDOW_DEFAULT } from '../constants.js';
+import { ORKIFY_DEPLOYS_DIR, DEPLOY_META_FILE, DEPLOY_CRASH_WINDOW_DEFAULT } from '../constants.js';
 import type { Orchestrator } from '../daemon/Orchestrator.js';
 import type { TelemetryReporter } from '../telemetry/TelemetryReporter.js';
 import type {
@@ -53,10 +54,13 @@ export class DeployExecutor {
 
   async execute(): Promise<void> {
     const deployConfig = this.cmd.deployConfig;
-    const projectDir = join(ORKIFY_DEPLOYS_DIR, this.cmd.artifactId.slice(0, 8));
-    const releasesDir = join(projectDir, 'releases');
-    const releaseDir = join(releasesDir, `v${this.cmd.version}`);
-    const currentLink = join(projectDir, 'current');
+    const deploysDir = this.options.deploysDir ?? ORKIFY_DEPLOYS_DIR;
+    const releaseName = this.options.localTarball
+      ? `local-${this.cmd.version}`
+      : `${this.cmd.version}-${this.cmd.artifactId.slice(0, 8)}`;
+    const releasesDir = join(deploysDir, 'releases');
+    const releaseDir = join(releasesDir, releaseName);
+    const currentLink = join(deploysDir, 'current');
 
     try {
       mkdirSync(releasesDir, { recursive: true });
@@ -77,19 +81,28 @@ export class DeployExecutor {
       await this.extract(tarPath, releaseDir);
       unlinkSync(tarPath);
 
+      // 2b. Write deploy metadata (used by restore to identify the current release)
+      writeFileSync(
+        join(releaseDir, DEPLOY_META_FILE),
+        JSON.stringify({
+          version: this.cmd.version,
+          artifactId: this.cmd.artifactId,
+        }),
+        'utf-8'
+      );
+
       // 3. Fetch secrets
       const secrets =
         this.options.secrets !== undefined
           ? this.options.secrets
           : await this.fetchSecrets(this.cmd.downloadToken);
 
-      // 4. Install
+      // 4. Install + 5. Build
       if (!this.options.skipInstall) {
         this.reportPhase('installing');
         await this.runCommand(deployConfig.install, releaseDir, secrets);
       }
 
-      // 5. Build
       if (!this.options.skipBuild && deployConfig.build) {
         this.reportPhase('building');
         await this.runCommand(deployConfig.build, releaseDir, secrets);
@@ -227,11 +240,16 @@ export class DeployExecutor {
   }
 
   private async runCommand(cmd: string, cwd: string, env: Record<string, string>): Promise<void> {
+    // Strip NODE_ENV during install/build so devDependencies (TypeScript,
+    // bundlers, etc.) are installed. Runtime processes get NODE_ENV from
+    // secrets/env as configured — this only affects the build phase.
+    const { NODE_ENV: _stripped, ...parentEnv } = process.env;
+
     return new Promise((resolve, reject) => {
       const isWin = process.platform === 'win32';
       const child = spawn(isWin ? 'cmd.exe' : 'sh', isWin ? ['/c', cmd] : ['-c', cmd], {
         cwd,
-        env: { ...process.env, ...env },
+        env: { ...parentEnv, ...env },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -316,7 +334,11 @@ export class DeployExecutor {
       cwd: currentLink,
     }));
 
-    const result = await this.orchestrator.reconcile(resolvedConfigs, secrets);
+    // Default NODE_ENV=production for runtime processes during deploy.
+    // Users can override this via secrets/env vars on the dashboard.
+    const runtimeEnv = { NODE_ENV: 'production', ...secrets };
+
+    const result = await this.orchestrator.reconcile(resolvedConfigs, runtimeEnv);
 
     if (result.started.length > 0) {
       console.log(`[deploy] Started: ${result.started.join(', ')}`);
@@ -332,11 +354,12 @@ export class DeployExecutor {
   private cleanupOldReleases(releasesDir: string, keep: number, preserveDir: string | null): void {
     try {
       const entries = readdirSync(releasesDir)
-        .filter((e) => e.startsWith('v') && statSync(join(releasesDir, e)).isDirectory())
+        .filter((e) => statSync(join(releasesDir, e)).isDirectory())
         .sort((a, b) => {
-          const numA = parseInt(a.slice(1), 10);
-          const numB = parseInt(b.slice(1), 10);
-          return numB - numA;
+          // Sort by directory mtime descending (newest first)
+          const mtimeA = statSync(join(releasesDir, a)).mtimeMs;
+          const mtimeB = statSync(join(releasesDir, b)).mtimeMs;
+          return mtimeB - mtimeA;
         });
 
       for (const entry of entries.slice(keep)) {

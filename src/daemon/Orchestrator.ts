@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
+import { cpus } from 'node:os';
 import { resolve, basename } from 'node:path';
 import {
   ExecMode,
@@ -53,7 +54,8 @@ export class Orchestrator extends EventEmitter {
       }
     }
 
-    const workerCount = payload.workers ?? DEFAULT_WORKERS;
+    const rawWorkers = payload.workers ?? DEFAULT_WORKERS;
+    const workerCount = rawWorkers === 0 ? cpus().length : rawWorkers;
     const execMode = workerCount > 1 ? ExecMode.CLUSTER : ExecMode.FORK;
 
     const config: ProcessConfig = {

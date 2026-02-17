@@ -6,6 +6,14 @@ import { ExecMode } from '../../src/constants.js';
 import { Orchestrator } from '../../src/daemon/Orchestrator.js';
 import type { ProcessConfig, UpPayload } from '../../src/types/index.js';
 
+// Allow per-test mocking of cpus() for workers:0 tests
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  return { ...actual, cpus: vi.fn(actual.cpus) };
+});
+
+const { cpus } = await import('node:os');
+
 describe('Orchestrator', () => {
   let tempDir: string;
   let scriptPath: string;
@@ -191,6 +199,77 @@ describe('Orchestrator', () => {
       } finally {
         consoleSpy.mockRestore();
         // No need to shutdown — all processes deleted
+      }
+    }, 15000);
+  });
+
+  describe('workers: 0 resolves to CPU cores', () => {
+    it('resolves workerCount 0 to cpus().length at runtime', async () => {
+      // Mock cpus() to return 1 core so the resolution stays in fork mode
+      // (cluster mode requires compiled ClusterWrapper.js, unavailable in tests)
+      vi.mocked(cpus).mockReturnValue([{}] as ReturnType<typeof cpus>);
+
+      const orkify = new Orchestrator();
+
+      try {
+        const info = await orkify.up({
+          script: scriptPath,
+          name: 'zero-workers',
+          workers: 0,
+          cwd: tempDir,
+        });
+
+        // 0 → cpus().length = 1 → fork mode
+        expect(info.workerCount).toBe(1);
+        expect(info.execMode).toBe(ExecMode.FORK);
+      } finally {
+        vi.mocked(cpus).mockRestore();
+        await orkify.shutdown();
+      }
+    }, 15000);
+  });
+
+  describe('getProcess', () => {
+    it('resolves process by numeric string id', async () => {
+      const orkify = new Orchestrator();
+
+      try {
+        const info = await orkify.up(makePayload('by-id'));
+        const found = orkify.getProcess(String(info.id));
+        if (!found) throw new Error('expected process');
+        expect(found.config.name).toBe('by-id');
+      } finally {
+        await orkify.shutdown();
+      }
+    }, 15000);
+
+    it('throws for unknown process name', () => {
+      const orkify = new Orchestrator();
+      expect(() => orkify.getProcess('nonexistent')).toThrow('not found');
+    });
+
+    it('throws for unknown numeric id', () => {
+      const orkify = new Orchestrator();
+      expect(() => orkify.getProcess(9999)).toThrow('not found');
+    });
+  });
+
+  describe('getDaemonStatus', () => {
+    it('returns process and worker counts', async () => {
+      const orkify = new Orchestrator();
+
+      try {
+        await orkify.up(makePayload('status-1'));
+        await orkify.up(makePayload('status-2'));
+        await new Promise((r) => setTimeout(r, 500));
+
+        const status = orkify.getDaemonStatus();
+        expect(status.pid).toBe(process.pid);
+        expect(status.uptime).toBeGreaterThan(0);
+        expect(status.processCount).toBe(2);
+        expect(status.workerCount).toBeGreaterThanOrEqual(2);
+      } finally {
+        await orkify.shutdown();
       }
     }, 15000);
   });
