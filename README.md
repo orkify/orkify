@@ -12,7 +12,8 @@ Modern JS process orchestration and deployment for your own infrastructure.
 - **Auto-Restart** - Automatically restart crashed processes with configurable limits
 - **File Watching** - Reload on file changes during development
 - **Deployment** - Local and remote deploy with automatic rollback
-- **Modern Stack** - Pure ESM, TypeScript, Node.js 22+
+- **Native TypeScript** - Run `.ts` files directly with no build step (Node.js 22.18+)
+- **Modern Stack** - Pure ESM, TypeScript, Node.js 22.18+
 - **MCP Integration** - Built-in Model Context Protocol server for AI tool integration
 
 ## Installation
@@ -27,6 +28,9 @@ npm run build
 ```bash
 # Start a single process (daemon mode)
 orkify up app.js
+
+# TypeScript works out of the box — no build step
+orkify up app.ts
 
 # Start with one worker per CPU core
 orkify up app.js -w 0
@@ -688,7 +692,7 @@ Container Orchestrator
 
 ## Requirements
 
-- Node.js 22.0.0 or higher
+- Node.js 22.18.0 or higher
 - **Cross-platform:** macOS, Linux, Windows (uses Unix sockets on macOS/Linux, Named Pipes on Windows)
 
 ## License
