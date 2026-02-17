@@ -74,6 +74,7 @@ export const IPCMessageType = {
   KILL_DAEMON: 'kill_daemon',
   CONFIGURE_TELEMETRY: 'configure_telemetry',
   PING: 'ping',
+  CRASH_TEST: 'crash_test',
 
   // Responses
   SUCCESS: 'success',

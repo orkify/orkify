@@ -29,7 +29,7 @@ describe('daemon-crash-recovery', () => {
   });
 
   it.skipIf(IS_WINDOWS)(
-    'recovers processes after daemon crash',
+    'recovers processes after daemon crash (SIGUSR2)',
     async () => {
       // Start a process
       orkify(`up ${join(EXAMPLES, 'basic', 'app.js')} -n ${APP_NAME}`);
@@ -47,16 +47,43 @@ describe('daemon-crash-recovery', () => {
       await waitForDaemonKilled(10000);
 
       // Wait for crash recovery to kick in and restore the process
-      // Recovery process: detect daemon death -> start new daemon -> RESTORE_CONFIGS
       await sleep(5000);
 
-      // Verify process is back online (waitForProcessOnline will auto-start daemon via orkify list)
+      // Verify process is back online
       await waitForProcessOnline(APP_NAME, 15000);
 
       const list = orkify('list');
       expect(list).toContain(APP_NAME);
       expect(list).toContain('online');
+
+      // Kill daemon so next test gets a fresh one without ORKIFY_CRASH_RECOVERY set
+      orkify('kill');
+      await waitForDaemonKilled();
     },
     45000
   );
+
+  it('recovers processes after daemon crash (IPC)', async () => {
+    // Start a process
+    orkify(`up ${join(EXAMPLES, 'basic', 'app.js')} -n ${APP_NAME}`);
+    await waitForProcessOnline(APP_NAME);
+
+    // Send CRASH_TEST IPC message to trigger an uncaught exception in the daemon.
+    // The handler throws via setTimeout, which exercises the
+    // crashRecovery → gracefulShutdown → exit path on all platforms.
+    orkify('_crash-test');
+
+    // Wait for daemon to die
+    await waitForDaemonKilled(10000);
+
+    // Wait for crash recovery to kick in and restore the process
+    await sleep(5000);
+
+    // Verify process is back online
+    await waitForProcessOnline(APP_NAME, 15000);
+
+    const list = orkify('list');
+    expect(list).toContain(APP_NAME);
+    expect(list).toContain('online');
+  }, 45000);
 });

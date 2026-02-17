@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import { crashTestCommand } from './commands/crash-test.js';
 import { daemonReloadCommand } from './commands/daemon-reload.js';
 import { deleteCommand } from './commands/delete.js';
 import { deployCommand } from './commands/deploy.js';
@@ -37,5 +38,6 @@ program.addCommand(killCommand);
 program.addCommand(daemonReloadCommand);
 program.addCommand(deployCommand);
 program.addCommand(mcpCommand);
+program.addCommand(crashTestCommand);
 
 program.parse();
