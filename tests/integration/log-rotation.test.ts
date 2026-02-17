@@ -42,6 +42,12 @@ describe('Log Rotation', () => {
             res.end('generated');
             return;
           }
+          if (req.url === '/ping') {
+            process.stdout.write('PING\\n');
+            res.writeHead(200);
+            res.end('ok');
+            return;
+          }
           res.writeHead(200);
           res.end('ok');
         });
@@ -147,11 +153,8 @@ describe('Log Rotation', () => {
     await waitForProcessOnline(appName);
     await waitForHttpReady('http://localhost:3048/');
 
-    // Generate log output after restart
-    for (let i = 0; i < 3; i++) {
-      await fetch('http://localhost:3048/generate');
-      await sleep(100);
-    }
+    // Write a small log line that won't trigger rotation (stays under 1024 bytes)
+    await fetch('http://localhost:3048/ping');
     await sleep(500);
 
     // Verify the log file has new content written after the restart
@@ -159,6 +162,6 @@ describe('Log Rotation', () => {
     expect(existsSync(currentLog)).toBe(true);
     const content = readFileSync(currentLog, 'utf8');
     expect(content.length).toBeGreaterThan(0);
-    expect(content).toContain('X');
+    expect(content).toContain('PING');
   }, 30000);
 });

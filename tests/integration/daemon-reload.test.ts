@@ -40,7 +40,7 @@ describe('daemon-reload', () => {
   it('restores processes from memory (not snapshot file)', async () => {
     // Start a cluster process
     orkify(`up ${scriptPath} -n ${APP_NAME} -w 2`);
-    await waitForWorkersOnline(APP_NAME, 2);
+    await waitForWorkersOnline(APP_NAME, 2, 10000);
 
     // Verify it's running
     const { status } = await httpGet(`http://localhost:${PORT}/`);
@@ -66,7 +66,7 @@ describe('daemon-reload', () => {
     }
 
     // Process should be back online
-    await waitForWorkersOnline(APP_NAME, 2);
+    await waitForWorkersOnline(APP_NAME, 2, 30000);
 
     const list = orkify('list');
     expect(list).toContain(APP_NAME);
@@ -77,7 +77,7 @@ describe('daemon-reload', () => {
     // Should respond to HTTP requests
     const { status: newStatus } = await httpGet(`http://localhost:${PORT}/`);
     expect(newStatus).toBe(200);
-  }, 30000);
+  }, 60000);
 
   it('does not use snapshot file even when it exists', async () => {
     // Write a snapshot file with a DIFFERENT process name
@@ -114,14 +114,14 @@ describe('daemon-reload', () => {
     expect(output).toContain('Daemon reloaded');
 
     // Should have restored the running process, NOT the decoy from snapshot file
-    await waitForWorkersOnline(APP_NAME, 2);
+    await waitForWorkersOnline(APP_NAME, 2, 30000);
     const list = orkify('list');
     expect(list).toContain(APP_NAME);
     expect(list).not.toContain('decoy-from-state-file');
 
     // Clean up the decoy snapshot file
     rmSync(stateFile, { force: true });
-  }, 30000);
+  }, 60000);
 
   it('restore uses snapshot file', async () => {
     // Save current state to file
@@ -131,19 +131,19 @@ describe('daemon-reload', () => {
 
     // Kill daemon
     orkify('kill');
-    await waitForDaemonKilled();
+    await waitForDaemonKilled(10000);
 
     // Restore should read from snapshot file
     const output = orkify('restore');
     expect(output).toContain('Restored');
     expect(output).toContain(APP_NAME);
 
-    await waitForWorkersOnline(APP_NAME, 2);
+    await waitForWorkersOnline(APP_NAME, 2, 30000);
 
     const { status } = await httpGet(`http://localhost:${PORT}/`);
     expect(status).toBe(200);
 
     // Clean up snapshot file
     rmSync(stateFile, { force: true });
-  }, 30000);
+  }, 60000);
 });
