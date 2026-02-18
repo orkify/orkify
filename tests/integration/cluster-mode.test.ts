@@ -83,10 +83,25 @@ describe('Cluster Mode', () => {
     });
     const reloadDone = new Promise<void>((resolve) => reloadProcess.on('close', () => resolve()));
 
-    // Send requests continuously throughout the reload
+    // Send requests continuously throughout the reload.
+    // Use Connection: close to disable keep-alive — without this, fetch
+    // reuses a TCP socket bound to a specific worker. When that worker is
+    // killed during reload, the kept-alive connection gets ECONNRESET even
+    // though the remaining workers are healthy. With Connection: close each
+    // request opens a fresh connection routed through the cluster primary.
     const requestLoop = async () => {
       while (!stopRequests) {
-        const { status, body } = await httpGet('http://localhost:4000/health');
+        let status = 0;
+        let body = '';
+        try {
+          const res = await fetch('http://localhost:4000/health', {
+            headers: { Connection: 'close' },
+          });
+          status = res.status;
+          body = await res.text();
+        } catch {
+          // Connection error
+        }
         if (status === 200) {
           successfulRequests++;
           try {
