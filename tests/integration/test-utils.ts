@@ -298,6 +298,25 @@ export async function waitForDaemonKilled(maxWait = 5000): Promise<void> {
 }
 
 /**
+ * Wait until a specific process is no longer alive.
+ * Uses `kill -0` to check without sending a signal.
+ */
+export async function waitForPidDead(pid: number, maxWait = 10000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < maxWait) {
+    try {
+      process.kill(pid, 0);
+      // Process still alive, keep waiting
+    } catch {
+      // Process is dead
+      return;
+    }
+    await sleep(50);
+  }
+  throw new Error(`PID ${pid} still alive after ${maxWait}ms`);
+}
+
+/**
  * Wait until the daemon is ready to accept commands after a kill/restart.
  * Runs `orkify list` in a retry loop until it succeeds without error.
  */

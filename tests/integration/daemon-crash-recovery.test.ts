@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { EXAMPLES, IS_WINDOWS } from './setup.js';
-import { orkify, sleep, waitForDaemonKilled, waitForProcessOnline } from './test-utils.js';
+import { orkify, waitForDaemonReady, waitForPidDead, waitForProcessOnline } from './test-utils.js';
 
 describe('daemon-crash-recovery', () => {
   const APP_NAME = 'test-crash-recover';
@@ -43,24 +43,27 @@ describe('daemon-crash-recovery', () => {
       // (the daemon registers a SIGUSR2 handler that throws for crash testing)
       process.kill(daemonPid, 'SIGUSR2');
 
-      // Wait for daemon to die
-      await waitForDaemonKilled(10000);
+      // Wait for the old daemon process to actually die (PID-based, not socket-based,
+      // because the recovery daemon recreates the socket almost immediately)
+      await waitForPidDead(daemonPid, 10000);
 
-      // Wait for crash recovery to kick in and restore the process
-      await sleep(5000);
+      // Wait for the recovery daemon to come up
+      await waitForDaemonReady(15000);
 
       // Verify process is back online
-      await waitForProcessOnline(APP_NAME, 15000);
+      await waitForProcessOnline(APP_NAME, 20000);
 
       const list = orkify('list');
       expect(list).toContain(APP_NAME);
       expect(list).toContain('online');
 
-      // Kill daemon so next test gets a fresh one without ORKIFY_CRASH_RECOVERY set
+      // Kill daemon so next test gets a fresh one without ORKIFY_CRASH_RECOVERY set.
+      // Read the recovery daemon's PID and wait for it to actually die.
+      const recoveryPid = parseInt(readFileSync(DAEMON_PID_FILE, 'utf-8').trim(), 10);
       orkify('kill');
-      await waitForDaemonKilled();
+      await waitForPidDead(recoveryPid, 10000);
     },
-    45000
+    60000
   );
 
   it('recovers processes after daemon crash (IPC)', async () => {
@@ -68,22 +71,25 @@ describe('daemon-crash-recovery', () => {
     orkify(`up ${join(EXAMPLES, 'basic', 'app.js')} -n ${APP_NAME}`);
     await waitForProcessOnline(APP_NAME);
 
+    // Read daemon PID before crash
+    const daemonPid = parseInt(readFileSync(DAEMON_PID_FILE, 'utf-8').trim(), 10);
+
     // Send CRASH_TEST IPC message to trigger an uncaught exception in the daemon.
     // The handler throws via setTimeout, which exercises the
     // crashRecovery → gracefulShutdown → exit path on all platforms.
     orkify('_crash-test');
 
-    // Wait for daemon to die
-    await waitForDaemonKilled(10000);
+    // Wait for old daemon to die
+    await waitForPidDead(daemonPid, 10000);
 
-    // Wait for crash recovery to kick in and restore the process
-    await sleep(5000);
+    // Wait for the recovery daemon to come up
+    await waitForDaemonReady(15000);
 
     // Verify process is back online
-    await waitForProcessOnline(APP_NAME, 15000);
+    await waitForProcessOnline(APP_NAME, 20000);
 
     const list = orkify('list');
     expect(list).toContain(APP_NAME);
     expect(list).toContain('online');
-  }, 45000);
+  }, 60000);
 });

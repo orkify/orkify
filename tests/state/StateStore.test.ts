@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { parse } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { ExecMode } from '../../src/constants.js';
 import { StateStore } from '../../src/state/StateStore.js';
-import type { ProcessConfig } from '../../src/types/index.js';
+import type { McpStartPayload, ProcessConfig } from '../../src/types/index.js';
 
 describe('StateStore', () => {
   let tempDir: string;
@@ -119,6 +119,99 @@ describe('StateStore', () => {
 
     it('works when file does not exist', async () => {
       await expect(store.clear()).resolves.not.toThrow();
+    });
+  });
+
+  describe('save with MCP options', () => {
+    it('includes mcp in YAML when provided', async () => {
+      const mcp: McpStartPayload = {
+        transport: 'simple-http',
+        port: 8787,
+        bind: '127.0.0.1',
+        cors: '*',
+      };
+      await store.save([createTestConfig('app')], mcp);
+
+      const content = readFileSync(stateFile, 'utf-8');
+      const parsed = parse(content);
+      expect(parsed.mcp).toEqual({
+        transport: 'simple-http',
+        port: 8787,
+        bind: '127.0.0.1',
+        cors: '*',
+      });
+    });
+
+    it('omits mcp key when not provided', async () => {
+      await store.save([createTestConfig('app')]);
+
+      const content = readFileSync(stateFile, 'utf-8');
+      const parsed = parse(content);
+      expect(parsed.mcp).toBeUndefined();
+    });
+  });
+
+  describe('loadFull', () => {
+    it('returns mcp when present in snapshot', async () => {
+      const mcp: McpStartPayload = { transport: 'simple-http', port: 9090, bind: '0.0.0.0' };
+      await store.save([createTestConfig('app')], mcp);
+
+      const state = await store.loadFull();
+      expect(state.mcp).toEqual({ transport: 'simple-http', port: 9090, bind: '0.0.0.0' });
+      expect(state.processes).toHaveLength(1);
+    });
+
+    it('preserves all mcp fields including cors', async () => {
+      const mcp: McpStartPayload = {
+        transport: 'simple-http',
+        port: 8787,
+        bind: '127.0.0.1',
+        cors: '*',
+      };
+      await store.save([createTestConfig('app')], mcp);
+
+      const state = await store.loadFull();
+      expect(state.mcp).toEqual({
+        transport: 'simple-http',
+        port: 8787,
+        bind: '127.0.0.1',
+        cors: '*',
+      });
+    });
+
+    it('returns mcp undefined for old snapshots without mcp', async () => {
+      await store.save([createTestConfig('app')]);
+
+      const state = await store.loadFull();
+      expect(state.mcp).toBeUndefined();
+      expect(state.processes).toHaveLength(1);
+    });
+
+    it('returns empty state when file does not exist', async () => {
+      const state = await store.loadFull();
+      expect(state.processes).toEqual([]);
+      expect(state.mcp).toBeUndefined();
+    });
+
+    it('ignores invalid mcp section in snapshot', async () => {
+      const badState = {
+        version: 1,
+        processes: [],
+        mcp: { transport: 'unknown', port: 'not-a-number' },
+      };
+      writeFileSync(stateFile, stringify(badState), 'utf-8');
+
+      const state = await store.loadFull();
+      expect(state.mcp).toBeUndefined();
+    });
+
+    it('coerces env values to strings', async () => {
+      const config = createTestConfig('app');
+      config.env = { PORT: '3000' };
+      await store.save([config]);
+
+      const state = await store.loadFull();
+      expect(typeof state.processes[0].env.PORT).toBe('string');
     });
   });
 

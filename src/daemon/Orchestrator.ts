@@ -15,7 +15,14 @@ import {
   KILL_TIMEOUT,
 } from '../constants.js';
 import { StateStore } from '../state/StateStore.js';
-import type { ProcessConfig, ProcessInfo, ReconcileResult, UpPayload } from '../types/index.js';
+import type {
+  McpStartPayload,
+  ProcessConfig,
+  ProcessInfo,
+  ReconcileResult,
+  SavedState,
+  UpPayload,
+} from '../types/index.js';
 import { GracefulManager } from './GracefulManager.js';
 import { ManagedProcess } from './ManagedProcess.js';
 
@@ -228,13 +235,17 @@ export class Orchestrator extends EventEmitter {
       .map((p) => p.config);
   }
 
-  async snap(options?: { noEnv?: boolean; file?: string }): Promise<void> {
+  async snap(options?: {
+    noEnv?: boolean;
+    file?: string;
+    mcpOptions?: McpStartPayload;
+  }): Promise<void> {
     let configs = this.getRunningConfigs();
     if (options?.noEnv) {
       configs = configs.map((c) => ({ ...c, env: {} }));
     }
     const store = options?.file ? new StateStore(options.file) : this.stateStore;
-    await store.save(configs);
+    await store.save(configs, options?.mcpOptions);
   }
 
   async restoreFromMemory(configs: ProcessConfig[]): Promise<ProcessInfo[]> {
@@ -278,10 +289,13 @@ export class Orchestrator extends EventEmitter {
     return results;
   }
 
-  async restoreFromSnapshot(file?: string): Promise<ProcessInfo[]> {
+  async restoreFromSnapshot(
+    file?: string
+  ): Promise<{ processes: ProcessInfo[]; mcpState?: McpStartPayload }> {
     const store = file ? new StateStore(file) : this.stateStore;
-    const configs = await store.load();
-    return this.restoreFromMemory(configs);
+    const state: SavedState = await store.loadFull();
+    const processes = await this.restoreFromMemory(state.processes);
+    return { processes, mcpState: state.mcp };
   }
 
   async shutdown(): Promise<void> {

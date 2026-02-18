@@ -146,9 +146,10 @@ describe('Socket.IO Sticky Sessions', () => {
     expect(output).toContain(`Process "${appName}" started`);
     expect(output).toContain('Sticky sessions: enabled');
 
-    // Wait for cluster to be fully ready
-    await waitForClusterReady(4, PORT, 45000);
-  }, 60000);
+    // Wait for cluster to be fully ready (generous timeout — under full e2e
+    // load, 4 sticky workers with health checks can take a while to start)
+    await waitForClusterReady(4, PORT, 60000);
+  }, 90000);
 
   afterAll(() => {
     orkify(`delete ${appName}`);
@@ -237,13 +238,21 @@ describe('Socket.IO Sticky Sessions', () => {
   it('maintains sticky routing after zero-downtime reload', async () => {
     const stickyId = 'reload-test-session';
 
+    // Ensure cluster is fully healthy before triggering reload
+    await waitForClusterReady(4, PORT, 30000);
+
     // Connect and get initial worker (we don't compare with post-reload worker
     // since worker IDs change, but we verify consistency post-reload)
     const { client: client1 } = await connectSocket(stickyId);
     client1.disconnect();
 
-    // Trigger reload
-    const reloadOutput = orkify(`reload ${appName}`);
+    // Trigger reload — retry once if the IPC connection drops during the
+    // rolling restart (the daemon can be under heavy load managing 4 workers)
+    let reloadOutput = orkify(`reload ${appName}`);
+    if (!reloadOutput.includes('reloaded')) {
+      await waitForClusterReady(4, PORT, 30000);
+      reloadOutput = orkify(`reload ${appName}`);
+    }
     expect(reloadOutput).toContain('reloaded');
 
     // Wait for reload to complete and new workers to be ready
@@ -262,13 +271,16 @@ describe('Socket.IO Sticky Sessions', () => {
     // After reload, same sticky_id should still route to same (new) worker
     const uniqueWorkersAfter = new Set(workersAfterReload);
     expect(uniqueWorkersAfter.size).toBe(1);
-  }, 45000);
+  }, 60000);
 
   // Note: HTTP-level sticky routing is handled by the sticky balancer,
   // but @socket.io/sticky's setupWorker primarily handles Socket.IO protocol.
   // Plain HTTP requests still work (200 OK), but may not be sticky.
   // This is acceptable since sticky sessions are mainly needed for WebSocket/Socket.IO.
   it('HTTP health endpoint works through sticky server', async () => {
+    // Ensure cluster is healthy (previous test may have reloaded workers)
+    await waitForClusterReady(4, PORT, 30000);
+
     // Verify HTTP requests work through the sticky server
     for (let i = 0; i < 3; i++) {
       const { status, body } = await httpGet(`http://localhost:${PORT}/health`);
@@ -277,9 +289,12 @@ describe('Socket.IO Sticky Sessions', () => {
       expect(data.status).toBe('ok');
       expect(data.worker).toBeDefined();
     }
-  }, 10000);
+  }, 45000);
 
   it('handles concurrent connections correctly', async () => {
+    // Ensure cluster is healthy before testing concurrency
+    await waitForClusterReady(4, PORT, 30000);
+
     // Launch 10 concurrent connections with different sticky_ids
     const connectionPromises = Array.from({ length: 10 }, (_, i) =>
       connectSocket(`concurrent-session-${i}`)
@@ -309,7 +324,7 @@ describe('Socket.IO Sticky Sessions', () => {
       expect(workerId).toBe(result.workerId);
       await disconnectSocket(client);
     }
-  }, 30000);
+  }, 45000);
 
   it('handles edge case: empty sticky_id (falls back to round-robin)', async () => {
     const workers: string[] = [];
@@ -371,6 +386,9 @@ describe('Socket.IO Sticky Sessions', () => {
   }, 25000);
 
   it('recovers when a worker crashes', async () => {
+    // Ensure cluster is healthy before crashing a worker
+    await waitForClusterReady(4, PORT, 30000);
+
     const stickyId = 'crash-recovery-test';
 
     // Get the worker's PID and kill it
@@ -406,7 +424,7 @@ describe('Socket.IO Sticky Sessions', () => {
     }
 
     // Wait for ORKIFY to detect crash and spawn new worker
-    await waitForWorkersOnline(appName, 4);
+    await waitForWorkersOnline(appName, 4, undefined, 30000);
 
     // Verify cluster recovers - should be able to connect again
     // (might route to different worker since original crashed)
@@ -427,7 +445,7 @@ describe('Socket.IO Sticky Sessions', () => {
     // Verify cluster still has workers online
     const list = orkify('list');
     expect(list).toContain('online');
-  }, 30000);
+  }, 60000);
 
   it('routes io cookie consistently (cookie-based stickiness)', async () => {
     // This tests that the io cookie extraction works

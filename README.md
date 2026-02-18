@@ -97,7 +97,11 @@ orkify run app.js -w 4
 | `orkify deploy pack [dir]`       | Create a deploy tarball                          |
 | `orkify deploy local <tarball>`  | Deploy from a local tarball                      |
 | `orkify deploy upload [dir]`     | Upload a build artifact for deployment           |
-| `orkify mcp`                     | Start MCP server for AI tools                    |
+| `orkify mcp`                     | Start MCP server for AI tools (stdio)            |
+| `orkify mcp --simple-http`       | Start MCP HTTP server (runs inside daemon)       |
+| `orkify mcp stop`                | Stop the MCP HTTP server                         |
+| `orkify mcp status`              | Show MCP HTTP server status                      |
+| `orkify mcp keygen`              | Generate a new MCP API key                       |
 
 ## Options for `up` and `run`
 
@@ -368,6 +372,36 @@ orkify restore
 orkify snap config/processes.yml
 orkify restore config/processes.yml
 ```
+
+### File format
+
+```yaml
+version: 1
+processes:
+  - name: 'api'
+    script: '/app/server.js'
+    cwd: '/app'
+    workerCount: 4
+    execMode: 'cluster'
+    watch: false
+    env:
+      NODE_ENV: 'production'
+      PORT: '3000'
+    nodeArgs: []
+    args: []
+    killTimeout: 5000
+    maxRestarts: 10
+    minUptime: 1000
+    restartDelay: 100
+    sticky: false
+mcp:
+  transport: 'simple-http'
+  port: 8787
+  bind: '127.0.0.1'
+  cors: '*'
+```
+
+The `mcp` section is only present when the MCP HTTP server is running at snapshot time. Old snapshots without `mcp` are loaded normally — `orkify restore` skips MCP startup in that case.
 
 ### Restore behavior
 
@@ -740,9 +774,46 @@ ORKIFY_API_KEY=orkify_xxx orkify up app.js
 
 ## MCP Integration
 
-ORKIFY includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) server, enabling AI assistants like Claude Code to manage your processes directly.
+orkify includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) server, enabling AI assistants like Claude Code to manage your processes directly. It supports two transports:
 
-### Setup with Claude Code
+- **Stdio** (default) — for local AI tools running on the same machine. No auth needed.
+- **HTTP** — for remote AI agents over the network. Authenticated via bearer tokens.
+
+### Stdio Mode (Local)
+
+Stdio is the default transport. The MCP client spawns orkify as a subprocess — same user, same machine, no network involved. No authentication is required.
+
+There are three ways to register the MCP server with your AI tools:
+
+#### Option A — `add-mcp` (multi-tool)
+
+[`add-mcp`](https://github.com/nicepkg/add-mcp) auto-detects installed AI tools (Claude Code, Cursor, VS Code, Windsurf, etc.) and writes the correct config for each one.
+
+```bash
+# Install once (global)
+npm install -g add-mcp
+
+# Auto-detect tools and register orkify (interactive)
+npx add-mcp "orkify mcp"
+
+# Register globally (user-level, all projects)
+npx add-mcp "orkify mcp" -g
+
+# Target a specific tool
+npx add-mcp "orkify mcp" -a claude-code
+npx add-mcp "orkify mcp" -a cursor
+npx add-mcp "orkify mcp" -a vscode
+```
+
+#### Option B — Claude Code CLI
+
+If you only use Claude Code:
+
+```bash
+claude mcp add orkify -- orkify mcp
+```
+
+#### Option C — Manual JSON
 
 Add to your Claude Code MCP settings (`~/.claude/settings.json`):
 
@@ -757,7 +828,160 @@ Add to your Claude Code MCP settings (`~/.claude/settings.json`):
 }
 ```
 
-Or use the Claude Code `/mcp` command to add it interactively.
+For Cursor, VS Code, and other tools, consult their docs for the equivalent MCP config location.
+
+### HTTP Mode (Remote)
+
+HTTP mode starts an authenticated HTTP server inside the daemon that remote AI agents can connect to. Because it runs in-process with the daemon, the MCP server is automatically managed by `orkify kill`, `orkify snap`/`orkify restore`, `orkify daemon-reload`, and crash recovery.
+
+#### 1. Generate a key
+
+```bash
+# Full access (all tools)
+orkify mcp keygen --name "my-agent"
+
+# Read-only (list and logs only)
+orkify mcp keygen --name "monitor" --tools list,logs
+
+# Ops access (specific tools)
+orkify mcp keygen --name "ops" --tools list,logs,restart,reload,down
+
+# Restrict to specific IPs (individual or CIDR)
+orkify mcp keygen --name "ci-agent" --allowed-ips "10.0.0.0/8,192.168.1.50"
+```
+
+The command prints the token to stdout and adds it to `~/.orkify/mcp.yml`.
+
+#### 2. Start the HTTP server
+
+```bash
+# Default: localhost:8787
+orkify mcp --simple-http
+
+# Custom port and bind address
+orkify mcp --simple-http --port 9090 --bind 0.0.0.0
+```
+
+#### 3. Manage the HTTP server
+
+```bash
+# Check if the MCP HTTP server is running
+orkify mcp status
+
+# Stop the MCP HTTP server
+orkify mcp stop
+```
+
+#### 4. Connect a client
+
+MCP clients authenticate with `Authorization: Bearer <token>`:
+
+```bash
+curl -X POST http://localhost:8787/mcp \
+  -H "Authorization: Bearer orkify_mcp_..." \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}'
+```
+
+#### 5. Register with AI tools
+
+**`add-mcp`:**
+
+```bash
+npx add-mcp "http://your-server:8787/mcp" \
+  --header "Authorization: Bearer orkify_mcp_..." \
+  -n orkify
+```
+
+**Claude Code CLI:**
+
+```bash
+claude mcp add --transport http \
+  --header "Authorization: Bearer orkify_mcp_..." \
+  orkify http://your-server:8787/mcp
+```
+
+#### HTTP Options
+
+```
+--simple-http              Use HTTP transport with local key auth
+--port <port>          HTTP port (default: 8787)
+--bind <address>       HTTP bind address (default: 127.0.0.1)
+--cors <origin>        Enable CORS ("*", a specific URL, or comma-separated URLs)
+```
+
+#### CORS (Browser Clients)
+
+By default, browser-based MCP clients are blocked by CORS policy. Enable CORS with the `--cors` flag:
+
+```bash
+# Allow any origin
+orkify mcp --simple-http --cors "*"
+
+# Allow a specific origin
+orkify mcp --simple-http --cors "https://dashboard.example.com"
+```
+
+When a specific origin is set (not `*`), the server includes a `Vary: Origin` header for correct HTTP caching. OPTIONS preflight requests are handled automatically and cached for 24 hours.
+
+### Key Management
+
+Keys are stored in `~/.orkify/mcp.yml` (created with `0600` permissions):
+
+```yaml
+keys:
+  - name: my-agent
+    token: orkify_mcp_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6
+    tools:
+      - '*'
+
+  - name: monitor
+    token: orkify_mcp_f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1
+    tools:
+      - list
+      - logs
+
+  - name: ci-agent
+    token: orkify_mcp_9876543210ab9876543210ab9876543210ab9876543210ab
+    tools:
+      - list
+      - logs
+      - restart
+      - reload
+      - down
+    allowedIps:
+      - 10.0.0.0/8
+      - 192.168.1.50
+```
+
+Each key has:
+
+| Field        | Description                                                      |
+| ------------ | ---------------------------------------------------------------- |
+| `name`       | Identifier for logging and error messages                        |
+| `token`      | Bearer token (`orkify_mcp_` + 48 hex chars)                      |
+| `tools`      | Allowed MCP tools — `["*"]` for all, or explicit list            |
+| `allowedIps` | Optional IP allowlist — individual IPs or CIDRs (all if omitted) |
+
+#### Keygen Options
+
+```
+orkify mcp keygen [--name <name>] [--tools <tool,...>] [--allowed-ips <ips>]
+
+--name <name>           Key name for identification (default: "default")
+--tools <tools>         Comma-separated list of allowed tools (default: all)
+--allowed-ips <ips>     Comma-separated IPs or CIDRs (default: all)
+```
+
+#### Editing Keys
+
+The config file is plain YAML — you can hand-edit it to rename keys, change tool permissions, or remove keys. The server reloads the config on `SIGHUP` or file change (polled every 2 seconds), so changes take effect without restarting.
+
+### Tool Scoping
+
+When a key has a restricted `tools` list, any call to a tool not in the list returns a `FORBIDDEN` error. This lets you create read-only keys for monitoring dashboards or limited-access keys for specific teams.
+
+Valid tool names: `list`, `logs`, `snap`, `listAllUsers`, `up`, `down`, `restart`, `reload`, `delete`, `restore`, `kill`.
 
 ### Available MCP Tools
 

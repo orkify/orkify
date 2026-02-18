@@ -2,8 +2,9 @@ import { existsSync } from 'node:fs';
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { stringify, parse } from 'yaml';
+import { validateMcpState } from '../config/schema.js';
 import { SNAPSHOT_FILE } from '../constants.js';
-import type { ProcessConfig, SavedState } from '../types/index.js';
+import type { McpStartPayload, ProcessConfig, SavedState } from '../types/index.js';
 
 const STATE_VERSION = 1;
 
@@ -14,10 +15,11 @@ export class StateStore {
     this.filePath = filePath;
   }
 
-  async save(processes: ProcessConfig[]): Promise<void> {
+  async save(processes: ProcessConfig[], mcp?: McpStartPayload): Promise<void> {
     const state: SavedState = {
       version: STATE_VERSION,
       processes,
+      ...(mcp ? { mcp } : {}),
     };
 
     // Ensure directory exists
@@ -34,8 +36,13 @@ export class StateStore {
   }
 
   async load(): Promise<ProcessConfig[]> {
+    const state = await this.loadFull();
+    return state.processes;
+  }
+
+  async loadFull(): Promise<SavedState> {
     if (!existsSync(this.filePath)) {
-      return [];
+      return { processes: [] };
     }
 
     try {
@@ -62,10 +69,15 @@ export class StateStore {
         }
       }
 
-      return processes;
+      const mcp = validateMcpState(state?.mcp) ? (state.mcp as McpStartPayload) : undefined;
+      if (state?.mcp && !mcp) {
+        console.warn('Snapshot contains invalid mcp section — ignoring');
+      }
+
+      return { ...state, processes, mcp };
     } catch (err) {
       console.error('Failed to load snapshot:', err);
-      return [];
+      return { processes: [] };
     }
   }
 

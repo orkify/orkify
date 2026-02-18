@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { TOOL_NAMES } from '../../src/mcp/auth.js';
 import { orkify, waitForProcessOnline, waitForWorkersOnline } from './test-utils.js';
 
 const BIN = join(process.cwd(), 'bin', 'orkify');
@@ -42,23 +43,17 @@ describe('MCP Server', () => {
   });
 
   describe('Tool Discovery', () => {
-    it('lists all available tools', async () => {
+    it('lists all available tools matching TOOL_NAMES', async () => {
       const tools = await client.listTools();
       const toolNames = tools.tools.map((t) => t.name);
 
-      expect(toolNames).toContain('list');
-      expect(toolNames).toContain('up');
-      expect(toolNames).toContain('down');
-      expect(toolNames).toContain('restart');
-      expect(toolNames).toContain('reload');
-      expect(toolNames).toContain('delete');
-      expect(toolNames).toContain('logs');
-      expect(toolNames).toContain('snap');
-      expect(toolNames).toContain('restore');
-      expect(toolNames).toContain('listAllUsers');
-      expect(toolNames).toContain('kill');
+      // Every name in TOOL_NAMES must be registered on the server
+      for (const name of TOOL_NAMES) {
+        expect(toolNames).toContain(name);
+      }
 
-      expect(tools.tools.length).toBe(11);
+      // Server must not register tools absent from TOOL_NAMES
+      expect(tools.tools.length).toBe(TOOL_NAMES.length);
     });
 
     it('tools have descriptions', async () => {
@@ -217,7 +212,7 @@ describe('MCP Server', () => {
     beforeAll(async () => {
       orkify(`up ${join(EXAMPLES, 'basic', 'app.js')} -n mcp-test-reload -w 2`);
       await waitForWorkersOnline('mcp-test-reload', 2);
-    });
+    }, 45000);
 
     afterAll(() => {
       orkify('down mcp-test-reload');

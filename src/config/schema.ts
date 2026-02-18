@@ -58,3 +58,14 @@ export function validateTarget(target: unknown): Target {
 export function validateLogsOptions(options: unknown): LogsOptions {
   return logsOptionsSchema.parse(options);
 }
+
+export const mcpStateSchema = z.object({
+  transport: z.literal('simple-http'),
+  port: z.number().int().positive(),
+  bind: z.string().min(1),
+  cors: z.string().optional(),
+});
+
+export function validateMcpState(value: unknown): value is z.infer<typeof mcpStateSchema> {
+  return mcpStateSchema.safeParse(value).success;
+}

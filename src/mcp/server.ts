@@ -1,5 +1,6 @@
 import { cpus } from 'node:os';
 import { resolve } from 'node:path';
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -15,7 +16,8 @@ import type {
   RestorePayload,
 } from '../types/index.js';
 
-// Create a dedicated client for MCP server
+// Shared IPC client for all MCP sessions. DaemonClient is stateless per-request,
+// so concurrent tool calls from different sessions safely share a single instance.
 const mcpDaemonClient = new DaemonClient();
 
 /**
@@ -75,9 +77,34 @@ function parseWorkers(value: number | undefined): number {
 }
 
 /**
- * Create and configure the MCP server with all ORKIFY tools
+ * Check if a tool is accessible given the current auth context.
+ * - No authInfo (stdio mode): always allowed
+ * - Scopes include "*": all tools allowed
+ * - Otherwise: tool name must be in scopes
  */
-export function createMcpServer(): McpServer {
+export function checkToolAccess(
+  toolName: string,
+  authInfo?: AuthInfo
+): { allowed: true } | { allowed: false; error: ReturnType<typeof formatError> } {
+  if (!authInfo) return { allowed: true }; // stdio mode — no auth
+  if (authInfo.scopes.includes('*')) return { allowed: true };
+  if (authInfo.scopes.includes(toolName)) return { allowed: true };
+  return {
+    allowed: false,
+    error: formatError(
+      `Token "${authInfo.clientId}" does not have access to "${toolName}"`,
+      'FORBIDDEN'
+    ),
+  };
+}
+
+/**
+ * Create and configure the MCP server with all ORKIFY tools.
+ * When authInfo is provided (HTTP mode), per-tool scope checks are enforced.
+ */
+export function createMcpServer(options?: { authInfo?: AuthInfo }): McpServer {
+  const { authInfo } = options ?? {};
+
   const server = new McpServer({
     name: 'orkify',
     version: '1.0.0',
@@ -89,6 +116,8 @@ export function createMcpServer(): McpServer {
     'List all managed processes with their status, workers, memory, and CPU usage',
     {},
     async () => {
+      const access = checkToolAccess('list', authInfo);
+      if (!access.allowed) return access.error;
       try {
         const response = await mcpDaemonClient.request(IPCMessageType.LIST);
         if (response.success) {
@@ -134,6 +163,8 @@ export function createMcpServer(): McpServer {
         .describe('Health check endpoint path (e.g. /health). Requires port to be set.'),
     },
     async (params) => {
+      const access = checkToolAccess('up', authInfo);
+      if (!access.allowed) return access.error;
       try {
         const cwd = params.cwd || process.cwd();
         const payload: UpPayload = {
@@ -172,6 +203,8 @@ export function createMcpServer(): McpServer {
       target: z.string().describe('Process name, numeric ID, or "all"'),
     },
     async (params) => {
+      const access = checkToolAccess('down', authInfo);
+      if (!access.allowed) return access.error;
       try {
         const payload: TargetPayload = { target: params.target };
         const response = await mcpDaemonClient.request(IPCMessageType.DOWN, payload);
@@ -198,6 +231,8 @@ export function createMcpServer(): McpServer {
       target: z.string().describe('Process name, numeric ID, or "all"'),
     },
     async (params) => {
+      const access = checkToolAccess('restart', authInfo);
+      if (!access.allowed) return access.error;
       try {
         const payload: TargetPayload = { target: params.target };
         const response = await mcpDaemonClient.request(IPCMessageType.RESTART, payload);
@@ -224,6 +259,8 @@ export function createMcpServer(): McpServer {
       target: z.string().describe('Process name, numeric ID, or "all"'),
     },
     async (params) => {
+      const access = checkToolAccess('reload', authInfo);
+      if (!access.allowed) return access.error;
       try {
         const payload: TargetPayload = { target: params.target };
         const response = await mcpDaemonClient.request(IPCMessageType.RELOAD, payload);
@@ -250,6 +287,8 @@ export function createMcpServer(): McpServer {
       target: z.string().describe('Process name, numeric ID, or "all"'),
     },
     async (params) => {
+      const access = checkToolAccess('delete', authInfo);
+      if (!access.allowed) return access.error;
       try {
         const payload: TargetPayload = { target: params.target };
         const response = await mcpDaemonClient.request(IPCMessageType.DELETE, payload);
@@ -277,6 +316,8 @@ export function createMcpServer(): McpServer {
       lines: z.number().optional().describe('Number of lines to retrieve (default: 100)'),
     },
     async (params) => {
+      const access = checkToolAccess('logs', authInfo);
+      if (!access.allowed) return access.error;
       try {
         const payload: LogsPayload = {
           target: params.target,
@@ -313,6 +354,8 @@ export function createMcpServer(): McpServer {
         .describe('Path to snapshot file (default: ~/.orkify/snapshot.yml)'),
     },
     async (params) => {
+      const access = checkToolAccess('snap', authInfo);
+      if (!access.allowed) return access.error;
       try {
         const payload: SnapPayload = { noEnv: params.noEnv, file: params.file };
         const response = await mcpDaemonClient.request(IPCMessageType.SNAP, payload);
@@ -340,6 +383,8 @@ export function createMcpServer(): McpServer {
         .describe('Path to snapshot file (default: ~/.orkify/snapshot.yml)'),
     },
     async (params) => {
+      const access = checkToolAccess('restore', authInfo);
+      if (!access.allowed) return access.error;
       try {
         const payload: RestorePayload = { file: params.file };
         const response = await mcpDaemonClient.request(IPCMessageType.RESTORE, payload);
@@ -362,6 +407,8 @@ export function createMcpServer(): McpServer {
     'List processes from all users on the system. Requires elevated privileges (sudo) on Unix.',
     {},
     async () => {
+      const access = checkToolAccess('listAllUsers', authInfo);
+      if (!access.allowed) return access.error;
       try {
         // Check for elevated privileges on Unix
         if (process.platform !== 'win32' && !isElevated()) {
@@ -408,6 +455,8 @@ export function createMcpServer(): McpServer {
     'Stop the ORKIFY daemon process. All managed processes will be stopped.',
     {},
     async () => {
+      const access = checkToolAccess('kill', authInfo);
+      if (!access.allowed) return access.error;
       try {
         const response = await mcpDaemonClient.request(IPCMessageType.KILL_DAEMON);
         if (response.success) {

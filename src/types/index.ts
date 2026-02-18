@@ -76,6 +76,7 @@ export interface IPCRequest extends IPCMessage {
     | RestorePayload
     | DeployRestorePayload
     | TelemetryConfig
+    | McpStartPayload
     | ProcessConfig[];
 }
 
@@ -141,6 +142,24 @@ export interface SavedState {
   version?: number;
   deploy?: DeploySettings;
   processes: ProcessConfig[];
+  mcp?: McpStartPayload;
+}
+
+export type McpTransport = 'simple-http';
+
+export interface McpStartPayload {
+  transport: McpTransport;
+  port: number;
+  bind: string;
+  cors?: string;
+}
+
+export interface McpStatusResponse {
+  running: boolean;
+  transport?: McpTransport;
+  port?: number;
+  bind?: string;
+  cors?: string;
 }
 
 export interface DaemonStatus {

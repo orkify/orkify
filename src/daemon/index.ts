@@ -16,6 +16,7 @@ import { getOrkifyConfig } from '../deploy/config.js';
 import { DeployExecutor } from '../deploy/DeployExecutor.js';
 import { DaemonServer, type ClientConnection } from '../ipc/DaemonServer.js';
 import { createResponse } from '../ipc/protocol.js';
+import { startMcpHttpServer, type McpHttpServer } from '../mcp/http.js';
 import { TelemetryReporter } from '../telemetry/TelemetryReporter.js';
 import type {
   DeployCommand,
@@ -23,6 +24,7 @@ import type {
   DeployOptions,
   DeployRestorePayload,
   DeploySettings,
+  McpStartPayload,
   UpPayload,
   TargetPayload,
   LogsPayload,
@@ -73,6 +75,10 @@ if (apiKey) {
 } else {
   console.log('Telemetry disabled (no ORKIFY_API_KEY)');
 }
+
+// MCP HTTP server state
+let mcpServer: McpHttpServer | null = null;
+let mcpOptions: McpStartPayload | null = null;
 
 // Forward logs to connected clients
 orchestrator.on('log', (data) => {
@@ -128,14 +134,34 @@ server.registerHandler(IPCMessageType.LOGS, async (request, client: ClientConnec
 
 server.registerHandler(IPCMessageType.SNAP, async (request) => {
   const payload = request.payload as SnapPayload | undefined;
-  await orchestrator.snap({ noEnv: payload?.noEnv, file: payload?.file });
+  await orchestrator.snap({
+    noEnv: payload?.noEnv,
+    file: payload?.file,
+    mcpOptions: mcpOptions ?? undefined,
+  });
   return createResponse(request.id, true, { saved: true });
 });
 
 server.registerHandler(IPCMessageType.RESTORE, async (request) => {
   const payload = request.payload as RestorePayload | undefined;
-  const results = await orchestrator.restoreFromSnapshot(payload?.file);
-  return createResponse(request.id, true, results);
+  const { processes, mcpState } = await orchestrator.restoreFromSnapshot(payload?.file);
+
+  // Restore MCP HTTP server if it was running when snapshot was taken
+  if (mcpState && !mcpServer) {
+    try {
+      mcpServer = await startMcpHttpServer({
+        port: mcpState.port,
+        bind: mcpState.bind,
+        cors: mcpState.cors,
+        skipSignalHandlers: true,
+      });
+      mcpOptions = mcpState;
+    } catch (err) {
+      console.error('Failed to restore MCP server:', (err as Error).message);
+    }
+  }
+
+  return createResponse(request.id, true, processes);
 });
 
 server.registerHandler(IPCMessageType.RESTORE_CONFIGS, async (request) => {
@@ -260,24 +286,22 @@ server.registerHandler(IPCMessageType.CONFIGURE_TELEMETRY, async (request) => {
 server.registerHandler(IPCMessageType.KILL_DAEMON, async (request) => {
   // Schedule shutdown after sending response
   setTimeout(async () => {
-    try {
-      await telemetry?.shutdown();
-      await orchestrator.shutdown();
-      await server.stop();
-    } catch (err) {
-      console.error('Error during KILL_DAEMON shutdown:', (err as Error).message);
-    }
-    cleanup();
+    await gracefulShutdown();
     process.exit(0);
   }, 100);
 
-  // Return telemetry env vars + process configs so daemon-reload can restore in-memory
+  // Return telemetry env vars + process configs + MCP state so daemon-reload can restore
   const env: Record<string, string> = {};
   if (process.env.ORKIFY_API_KEY) env.ORKIFY_API_KEY = process.env.ORKIFY_API_KEY;
   if (process.env.ORKIFY_API_HOST) env.ORKIFY_API_HOST = process.env.ORKIFY_API_HOST;
   const processes = orchestrator.getRunningConfigs();
 
-  return createResponse(request.id, true, { killing: true, env, processes });
+  return createResponse(request.id, true, {
+    killing: true,
+    env,
+    processes,
+    mcpOptions: mcpOptions ?? undefined,
+  });
 });
 
 server.registerHandler(IPCMessageType.PING, async (request) => {
@@ -288,6 +312,109 @@ server.registerHandler(IPCMessageType.FLUSH, async (request) => {
   const payload = request.payload as TargetPayload;
   await orchestrator.flushLogs(payload.target);
   return createResponse(request.id, true, { flushed: true });
+});
+
+server.registerHandler(IPCMessageType.MCP_START, async (request) => {
+  const payload = request.payload as McpStartPayload;
+
+  // Validate transport type
+  if (payload.transport !== 'simple-http') {
+    return createResponse(
+      request.id,
+      false,
+      undefined,
+      `Unknown MCP transport: "${payload.transport}"`
+    );
+  }
+
+  // Already running with same options → idempotent success
+  if (mcpServer && mcpOptions) {
+    if (
+      mcpOptions.transport === payload.transport &&
+      mcpOptions.port === payload.port &&
+      mcpOptions.bind === payload.bind &&
+      mcpOptions.cors === payload.cors
+    ) {
+      return createResponse(request.id, true, {
+        started: false,
+        reason: 'already_running',
+        port: mcpOptions.port,
+        bind: mcpOptions.bind,
+      });
+    }
+    // Different options → stop old, start new.
+    // Stop first, then start. If the new one fails, the old one is gone.
+    const oldServer = mcpServer;
+    const oldOptions = mcpOptions;
+    try {
+      await oldServer.shutdown();
+      mcpServer = null;
+      mcpOptions = null;
+
+      mcpServer = await startMcpHttpServer({
+        port: payload.port,
+        bind: payload.bind,
+        cors: payload.cors,
+        skipSignalHandlers: true,
+      });
+      mcpOptions = payload;
+      return createResponse(request.id, true, {
+        started: true,
+        port: payload.port,
+        bind: payload.bind,
+      });
+    } catch (err) {
+      // New server failed to start — try to restore the old one
+      try {
+        mcpServer = await startMcpHttpServer({
+          port: oldOptions.port,
+          bind: oldOptions.bind,
+          cors: oldOptions.cors,
+          skipSignalHandlers: true,
+        });
+        mcpOptions = oldOptions;
+      } catch {
+        // Old server can't be restored either — MCP is down
+      }
+      throw err;
+    }
+  }
+
+  mcpServer = await startMcpHttpServer({
+    port: payload.port,
+    bind: payload.bind,
+    cors: payload.cors,
+    skipSignalHandlers: true,
+  });
+  mcpOptions = payload;
+  return createResponse(request.id, true, {
+    started: true,
+    port: payload.port,
+    bind: payload.bind,
+  });
+});
+
+server.registerHandler(IPCMessageType.MCP_STOP, async (request) => {
+  if (!mcpServer) {
+    return createResponse(request.id, true, { stopped: false, reason: 'not_running' });
+  }
+  await mcpServer.shutdown();
+  mcpServer = null;
+  mcpOptions = null;
+  return createResponse(request.id, true, { stopped: true });
+});
+
+server.registerHandler(IPCMessageType.MCP_STATUS, async (request) => {
+  if (!mcpServer || !mcpOptions) {
+    return createResponse(request.id, true, { running: false });
+  }
+  return createResponse(request.id, true, {
+    running: true,
+    transport: mcpOptions.transport,
+    port: mcpOptions.port,
+    bind: mcpOptions.bind,
+    cors: mcpOptions.cors,
+  });
 });
 
 server.registerHandler(IPCMessageType.CRASH_TEST, async (request) => {
@@ -314,19 +441,34 @@ function cleanup() {
 
 // Guard against concurrent shutdown sequences
 let isShuttingDown = false;
+let crashRecoveryRan = false;
 
 async function gracefulShutdown(): Promise<void> {
   if (isShuttingDown) return;
   isShuttingDown = true;
 
   try {
+    // Shut down MCP HTTP server first (before closing the IPC server)
+    if (mcpServer) {
+      await mcpServer.shutdown().catch(() => {});
+      mcpServer = null;
+      mcpOptions = null;
+    }
     await telemetry?.shutdown();
     await orchestrator.shutdown();
-    await server.stop();
+    // Skip server.stop() if crash recovery already ran — it calls cleanup()
+    // which removes the socket, and by now a new daemon may have created a
+    // fresh socket at the same path. server.stop() would delete that.
+    if (!crashRecoveryRan) {
+      await server.stop();
+    }
   } catch (err) {
     console.error('Error during graceful shutdown:', (err as Error).message);
   }
-  cleanup();
+
+  if (!crashRecoveryRan) {
+    cleanup();
+  }
 }
 
 /**
@@ -343,7 +485,7 @@ function crashRecovery(): void {
 
   try {
     const configs = orchestrator.getRunningConfigs();
-    if (configs.length === 0) {
+    if (configs.length === 0 && !mcpOptions) {
       console.error('Crash recovery: no running processes to restore');
       return;
     }
@@ -352,12 +494,17 @@ function crashRecovery(): void {
     if (process.env.ORKIFY_API_KEY) env.ORKIFY_API_KEY = process.env.ORKIFY_API_KEY;
     if (process.env.ORKIFY_API_HOST) env.ORKIFY_API_HOST = process.env.ORKIFY_API_HOST;
 
-    const payload = JSON.stringify({ env, configs });
+    const payload = JSON.stringify({
+      env,
+      configs,
+      mcpOptions: mcpOptions ?? undefined,
+    });
     const recoveryScript = join(__dirname, '..', 'cli', 'crash-recovery.js');
 
     // Remove PID file and socket now so the recovery script doesn't have to
     // wait for gracefulShutdown() — which may hang in a crashing process.
     cleanup();
+    crashRecoveryRan = true;
 
     const logFd = openSync(DAEMON_LOG_FILE, 'a');
 

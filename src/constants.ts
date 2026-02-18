@@ -80,6 +80,9 @@ export const IPCMessageType = {
   PING: 'ping',
   CRASH_TEST: 'crash_test',
   FLUSH: 'flush',
+  MCP_START: 'mcp_start',
+  MCP_STOP: 'mcp_stop',
+  MCP_STATUS: 'mcp_status',
 
   // Responses
   SUCCESS: 'success',
@@ -207,6 +210,11 @@ try {
 `.trim();
 
 export const METRICS_PROBE_IMPORT = `--import=data:text/javascript;base64,${Buffer.from(METRICS_PROBE_SRC).toString('base64')}`;
+
+// MCP HTTP
+export const MCP_CONFIG_FILE = join(ORKIFY_HOME, 'mcp.yml');
+export const MCP_DEFAULT_PORT = 8787;
+export const MCP_TOKEN_PREFIX = 'orkify_mcp_';
 
 // Deploy
 export const ORKIFY_DEPLOYS_DIR = join(ORKIFY_HOME, 'deploys');
