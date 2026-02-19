@@ -113,7 +113,7 @@ async function parseResponse(res: Response): Promise<Record<string, unknown>> {
  * Helper to run orkify commands with our test HOME.
  */
 function orkifyTest(args: string, timeout = 30000): string {
-  return orkifyWithEnv(args, { HOME: tmpDir }, timeout);
+  return orkifyWithEnv(args, { HOME: tmpDir, USERPROFILE: tmpDir }, timeout);
 }
 
 describe('MCP HTTP Server', () => {
@@ -140,7 +140,7 @@ describe('MCP HTTP Server', () => {
 
     // Find an available port
     port = await findFreePort();
-    testEnv = { HOME: tmpDir };
+    testEnv = { HOME: tmpDir, USERPROFILE: tmpDir };
 
     // Start the MCP HTTP server via daemon IPC
     orkifyWithEnv(`mcp --simple-http --port ${port} --bind 127.0.0.1`, testEnv);
@@ -786,7 +786,7 @@ async function startIsolatedServer(
   writeFileSync(join(home, 'mcp.yml'), stringifyYaml({ keys }));
 
   const serverPort = await findFreePort();
-  const env = { HOME: dir };
+  const env = { HOME: dir, USERPROFILE: dir };
   const quotedArgs = extraArgs.map((a) => (a.includes('*') ? `'${a}'` : a)).join(' ');
   orkifyWithEnv(`mcp --simple-http --port ${serverPort} --bind 127.0.0.1 ${quotedArgs}`, env);
 

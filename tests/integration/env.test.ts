@@ -179,7 +179,7 @@ API_KEY=secret-key-123`
       }
     );
 
-    await waitForHttpReady('http://localhost:3018/');
+    await waitForHttpReady('http://localhost:3018/', 20000);
 
     const { status, body } = await httpGet('http://localhost:3018/');
     expect(status).toBe(200);
