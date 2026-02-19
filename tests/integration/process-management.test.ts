@@ -6,6 +6,7 @@ import { EXAMPLES } from './setup.js';
 import {
   httpGet,
   orkify,
+  sleep,
   waitForDaemonKilled,
   waitForHttpReady,
   waitForProcessOnline,
@@ -264,7 +265,9 @@ describe('Numeric ID Operations', () => {
   }, 15000);
 
   it('can restart process by numeric ID', async () => {
-    // First restart it
+    // Allow daemon to settle after previous stop
+    await sleep(200);
+
     const list = orkify('list');
     const idMatch = list.match(new RegExp(`│\\s*(\\d+)\\s*│\\s*${appName}`));
     expect(idMatch).not.toBeNull();
