@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
-import { DAEMON_PID_FILE, IPCMessageType } from '../constants.js';
 import type { IPCResponse, ProcessConfig } from '../types/index.js';
+import { DAEMON_PID_FILE, IPCMessageType } from '../constants.js';
 import { DaemonClient } from './DaemonClient.js';
 
 /**

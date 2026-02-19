@@ -5,13 +5,13 @@ import { io as ioClient, type Socket } from 'socket.io-client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { EXAMPLES, spawnOrkify } from './setup.js';
 import {
+  disconnectSocket,
+  httpGet,
   orkify,
   sleep,
-  httpGet,
+  waitForClusterReady,
   waitForProcessRemoved,
   waitForWorkersOnline,
-  waitForClusterReady,
-  disconnectSocket,
 } from './test-utils.js';
 
 describe('Sticky Sessions Flag', () => {
@@ -501,7 +501,7 @@ describe('Socket.IO Cluster Mode (no sticky)', () => {
   const PORT = 3003;
 
   // Connect with retry for non-sticky mode (can be flaky)
-  async function connectAndGetWorker(): Promise<string | null> {
+  async function connectAndGetWorker(): Promise<null | string> {
     for (let attempt = 1; attempt <= 3; attempt++) {
       const client = ioClient(`http://localhost:${PORT}`, {
         transports: ['websocket'],
@@ -635,7 +635,7 @@ describe('Advanced Sticky Session Tests', () => {
         query: { sticky_id: `flood-${i}` },
       });
 
-      return new Promise<string | null>((resolve) => {
+      return new Promise<null | string>((resolve) => {
         const timer = setTimeout(() => {
           client.disconnect();
           resolve(null);

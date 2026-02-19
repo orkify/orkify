@@ -1,9 +1,9 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
+import type { McpStartPayload, ProcessConfig, ProcessInfo } from '../../types/index.js';
 import { IPCMessageType } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
 import { restoreDaemon } from '../../ipc/restoreDaemon.js';
-import type { McpStartPayload, ProcessConfig, ProcessInfo } from '../../types/index.js';
 
 export const daemonReloadCommand = new Command('daemon-reload')
   .description('Reload the daemon to pick up new code')

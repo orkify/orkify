@@ -14,7 +14,7 @@ describe('reload-resilience', () => {
   const PORT = 3044;
   const APP_NAME = 'test-reload-resilience';
 
-  function writeGoodScript(path: string, port: number | 0 = 0): void {
+  function writeGoodScript(path: string, port: 0 | number = 0): void {
     writeFileSync(
       path,
       `

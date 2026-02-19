@@ -1,20 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { cpus } from 'node:os';
-import { resolve, basename } from 'node:path';
-import {
-  ExecMode,
-  DEFAULT_WORKERS,
-  DEFAULT_MAX_RESTARTS,
-  DEFAULT_MIN_UPTIME,
-  DEFAULT_RESTART_DELAY,
-  DEFAULT_RELOAD_RETRIES,
-  DEFAULT_LOG_MAX_SIZE,
-  DEFAULT_LOG_MAX_FILES,
-  DEFAULT_LOG_MAX_AGE,
-  KILL_TIMEOUT,
-} from '../constants.js';
-import { StateStore } from '../state/StateStore.js';
+import { basename, resolve } from 'node:path';
 import type {
   McpStartPayload,
   ProcessConfig,
@@ -23,6 +10,19 @@ import type {
   SavedState,
   UpPayload,
 } from '../types/index.js';
+import {
+  DEFAULT_LOG_MAX_AGE,
+  DEFAULT_LOG_MAX_FILES,
+  DEFAULT_LOG_MAX_SIZE,
+  DEFAULT_MAX_RESTARTS,
+  DEFAULT_MIN_UPTIME,
+  DEFAULT_RELOAD_RETRIES,
+  DEFAULT_RESTART_DELAY,
+  DEFAULT_WORKERS,
+  ExecMode,
+  KILL_TIMEOUT,
+} from '../constants.js';
+import { StateStore } from '../state/StateStore.js';
 import { GracefulManager } from './GracefulManager.js';
 import { ManagedProcess } from './ManagedProcess.js';
 
@@ -138,7 +138,7 @@ export class Orchestrator extends EventEmitter {
     return container.getInfo();
   }
 
-  async down(target: string | number | 'all'): Promise<ProcessInfo[]> {
+  async down(target: 'all' | number | string): Promise<ProcessInfo[]> {
     const containers = this.resolveTarget(target);
     const results: ProcessInfo[] = [];
 
@@ -155,7 +155,7 @@ export class Orchestrator extends EventEmitter {
     return results;
   }
 
-  async restart(target: string | number | 'all'): Promise<ProcessInfo[]> {
+  async restart(target: 'all' | number | string): Promise<ProcessInfo[]> {
     const containers = this.resolveTarget(target);
     const results: ProcessInfo[] = [];
 
@@ -174,7 +174,7 @@ export class Orchestrator extends EventEmitter {
     return results;
   }
 
-  async reload(target: string | number | 'all'): Promise<ProcessInfo[]> {
+  async reload(target: 'all' | number | string): Promise<ProcessInfo[]> {
     const containers = this.resolveTarget(target);
     const results: ProcessInfo[] = [];
 
@@ -198,7 +198,7 @@ export class Orchestrator extends EventEmitter {
     return results;
   }
 
-  async delete(target: string | number | 'all'): Promise<ProcessInfo[]> {
+  async delete(target: 'all' | number | string): Promise<ProcessInfo[]> {
     const containers = this.resolveTarget(target);
     const results: ProcessInfo[] = [];
 
@@ -220,7 +220,7 @@ export class Orchestrator extends EventEmitter {
     return results;
   }
 
-  async flushLogs(target: string | number | 'all'): Promise<void> {
+  async flushLogs(target: 'all' | number | string): Promise<void> {
     const containers = this.resolveTarget(target);
     await Promise.all(containers.map((c) => c.flushLogs()));
   }
@@ -416,7 +416,7 @@ export class Orchestrator extends EventEmitter {
     return false;
   }
 
-  private resolveTarget(target: string | number | 'all'): ManagedProcess[] {
+  private resolveTarget(target: 'all' | number | string): ManagedProcess[] {
     if (target === 'all') {
       return Array.from(this.processes.values());
     }
@@ -450,7 +450,7 @@ export class Orchestrator extends EventEmitter {
     throw new Error(`Process "${target}" not found`);
   }
 
-  getProcess(target: string | number): ManagedProcess | undefined {
+  getProcess(target: number | string): ManagedProcess | undefined {
     const containers = this.resolveTarget(target);
     return containers[0];
   }

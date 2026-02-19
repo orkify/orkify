@@ -1,9 +1,9 @@
-import { randomUUID } from 'node:crypto';
-import { createServer, type Server } from 'node:http';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import express from 'express';
-import { LocalConfigVerifier, findKeyByName, isIpAllowed, startConfigWatcher } from './auth.js';
+import { randomUUID } from 'node:crypto';
+import { createServer, type Server } from 'node:http';
+import { findKeyByName, isIpAllowed, LocalConfigVerifier, startConfigWatcher } from './auth.js';
 import { createMcpServer } from './server.js';
 
 export interface HttpOptions {

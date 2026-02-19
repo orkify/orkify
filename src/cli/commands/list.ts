@@ -1,10 +1,10 @@
 import chalk from 'chalk';
 import Table from 'cli-table3';
 import { Command } from 'commander';
+import type { ProcessInfo } from '../../types/index.js';
 import { IPCMessageType, ProcessStatus } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-import { listAllUsers, isElevated } from '../../ipc/MultiUserClient.js';
-import type { ProcessInfo } from '../../types/index.js';
+import { isElevated, listAllUsers } from '../../ipc/MultiUserClient.js';
 
 function formatUptime(ms: number): string {
   const seconds = Math.floor(ms / 1000);

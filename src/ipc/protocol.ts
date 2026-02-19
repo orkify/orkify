@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { IPCMessageType } from '../constants.js';
 import type { IPCMessage, IPCRequest, IPCResponse } from '../types/index.js';
+import { IPCMessageType } from '../constants.js';
 
 const DELIMITER = '\n';
 

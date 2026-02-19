@@ -1,10 +1,10 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ProcessConfig } from '../../src/types/index.js';
 import { ORKIFY_CONFIG_FILE } from '../../src/constants.js';
 import { getOrkifyConfig } from '../../src/deploy/config.js';
-import type { ProcessConfig } from '../../src/types/index.js';
 
 describe('DeployExecutor reconcile integration', () => {
   let tempDir: string;

@@ -140,7 +140,7 @@ export async function waitForProcessOnline(name: string, maxWait = 15000): Promi
  * Can filter by process name and optionally verify HTTP endpoint.
  */
 export async function waitForWorkersOnline(
-  nameOrWorkers: string | number,
+  nameOrWorkers: number | string,
   expectedWorkersOrPort?: number,
   portOrMaxWait?: number,
   maxWait = 30000

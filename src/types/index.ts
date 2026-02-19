@@ -1,4 +1,4 @@
-import type { ProcessStatusType, ExecModeType, IPCMessageTypeType } from '../constants.js';
+import type { ExecModeType, IPCMessageTypeType, ProcessStatusType } from '../constants.js';
 
 export interface ProcessConfig {
   name: string;
@@ -69,15 +69,15 @@ export interface IPCMessage {
 
 export interface IPCRequest extends IPCMessage {
   payload?:
-    | UpPayload
-    | TargetPayload
-    | LogsPayload
-    | SnapPayload
-    | RestorePayload
     | DeployRestorePayload
-    | TelemetryConfig
+    | LogsPayload
     | McpStartPayload
-    | ProcessConfig[];
+    | ProcessConfig[]
+    | RestorePayload
+    | SnapPayload
+    | TargetPayload
+    | TelemetryConfig
+    | UpPayload;
 }
 
 export interface IPCResponse extends IPCMessage {
@@ -110,11 +110,11 @@ export interface UpPayload {
 }
 
 export interface TargetPayload {
-  target: string | number | 'all';
+  target: 'all' | number | string;
 }
 
 export interface LogsPayload {
-  target?: string | number;
+  target?: number | string;
   lines?: number;
   follow?: boolean;
 }
@@ -172,19 +172,19 @@ export interface DaemonStatus {
 // Telemetry types
 
 export type TelemetryEventType =
-  | 'process:start'
-  | 'process:stop'
+  | 'error:uncaughtException'
+  | 'error:unhandledRejection'
+  | 'process:deploy-failed'
+  | 'process:deploy-finished'
+  | 'process:deploy-started'
   | 'process:reload'
   | 'process:reloaded'
-  | 'process:deploy-started'
-  | 'process:deploy-finished'
-  | 'process:deploy-failed'
-  | 'worker:ready'
-  | 'worker:exit'
+  | 'process:start'
+  | 'process:stop'
   | 'worker:crash'
+  | 'worker:exit'
   | 'worker:maxRestarts'
-  | 'error:uncaughtException'
-  | 'error:unhandledRejection';
+  | 'worker:ready';
 
 export interface TelemetryEvent {
   type: TelemetryEventType;
@@ -266,8 +266,8 @@ export interface TelemetryErrorEvent {
   message: string;
   stack: string;
   fingerprint: string;
-  sourceContext: SourceContextFrame[] | null;
-  topFrame: { file: string; line: number; column: number } | null;
+  sourceContext: null | SourceContextFrame[];
+  topFrame: null | { file: string; line: number; column: number };
   diagnostics: CrashDiagnostics | null;
   nodeVersion: string;
   pid: number;
@@ -278,7 +278,7 @@ export interface TelemetryLogEntry {
   processName: string;
   workerId: number;
   timestamp: number;
-  level: 'info' | 'warn' | 'error';
+  level: 'error' | 'info' | 'warn';
   message: string;
 }
 
@@ -286,15 +286,15 @@ export interface DeployStatus {
   deployId: string;
   targetId: string;
   phase:
+    | 'building'
     | 'downloading'
     | 'extracting'
-    | 'installing'
-    | 'building'
-    | 'reloading'
-    | 'monitoring'
-    | 'success'
     | 'failed'
-    | 'rolled_back';
+    | 'installing'
+    | 'monitoring'
+    | 'reloading'
+    | 'rolled_back'
+    | 'success';
   buildLog?: string;
   error?: string;
 }

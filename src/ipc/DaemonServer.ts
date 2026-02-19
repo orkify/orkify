@@ -1,13 +1,13 @@
-import { unlinkSync, existsSync } from 'node:fs';
+import { existsSync, unlinkSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
-import { SOCKET_PATH, IPCMessageType } from '../constants.js';
 import type { IPCRequest, IPCResponse } from '../types/index.js';
-import { createResponse, serialize, createMessageParser } from './protocol.js';
+import { IPCMessageType, SOCKET_PATH } from '../constants.js';
+import { createMessageParser, createResponse, serialize } from './protocol.js';
 
 export type RequestHandler = (
   request: IPCRequest,
   client: ClientConnection
-) => Promise<IPCResponse> | IPCResponse;
+) => IPCResponse | Promise<IPCResponse>;
 
 export class ClientConnection {
   private socket: Socket;
@@ -44,7 +44,7 @@ export class ClientConnection {
 }
 
 export class DaemonServer {
-  private server: Server | null = null;
+  private server: null | Server = null;
   private clients = new Set<ClientConnection>();
   private handlers = new Map<string, RequestHandler>();
   private logSubscribers = new Map<string, Set<{ client: ClientConnection; requestId: string }>>();

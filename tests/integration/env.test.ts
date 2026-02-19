@@ -4,12 +4,12 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawnOrkify } from './setup.js';
 import {
-  orkify,
   httpGet,
+  orkify,
+  waitForHttpReady,
   waitForProcessOnline,
   waitForProcessRemoved,
   waitForWorkersOnline,
-  waitForHttpReady,
 } from './test-utils.js';
 
 describe('Environment Variables', () => {

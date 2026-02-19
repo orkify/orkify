@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { orkify, httpGet, waitForProcessOnline } from './test-utils.js';
+import { httpGet, orkify, waitForProcessOnline } from './test-utils.js';
 
 describe('Logs Streaming', () => {
   const appName = 'test-logs';

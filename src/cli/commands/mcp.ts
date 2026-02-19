@@ -1,17 +1,17 @@
 import chalk from 'chalk';
 import { Command, Option } from 'commander';
+import type { McpStatusResponse } from '../../types/index.js';
 import { IPCMessageType, MCP_DEFAULT_PORT } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-import type { McpKey } from '../../mcp/auth.js';
 import {
-  generateToken,
   appendKeyToConfig,
+  generateToken,
   loadMcpConfig,
-  warnIfConfigInsecure,
+  type McpKey,
   TOOL_NAMES,
+  warnIfConfigInsecure,
 } from '../../mcp/auth.js';
 import { startMcpServer } from '../../mcp/server.js';
-import type { McpStatusResponse } from '../../types/index.js';
 
 export const mcpCommand = new Command('mcp')
   .description('Start MCP server for AI tool integration (e.g., Claude Code)')

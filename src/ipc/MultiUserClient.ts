@@ -2,9 +2,9 @@ import { execSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { connect } from 'node:net';
 import { platform } from 'node:os';
+import type { IPCResponse, ProcessInfo } from '../types/index.js';
 import { IPC_CONNECT_TIMEOUT, IPC_RESPONSE_TIMEOUT, IPCMessageType } from '../constants.js';
-import type { ProcessInfo, IPCResponse } from '../types/index.js';
-import { createRequest, serialize, createMessageParser } from './protocol.js';
+import { createMessageParser, createRequest, serialize } from './protocol.js';
 
 export interface UserProcessList {
   user: string;
@@ -119,7 +119,7 @@ function discoverWindowsPipes(): Array<{ user: string; socketPath: string }> {
  */
 async function getProcessListFromSocket(
   socketPath: string
-): Promise<{ processes: ProcessInfo[] } | { error: string }> {
+): Promise<{ error: string } | { processes: ProcessInfo[] }> {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       socket.destroy();

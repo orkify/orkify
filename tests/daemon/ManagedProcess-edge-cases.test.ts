@@ -1,11 +1,11 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ProcessConfig } from '../../src/types/index.js';
 import { ExecMode } from '../../src/constants.js';
 import { ManagedProcess } from '../../src/daemon/ManagedProcess.js';
-import type { ProcessConfig } from '../../src/types/index.js';
 
 describe('ManagedProcess edge cases', () => {
   let tempDir: string;

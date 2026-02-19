@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { orkify, sleep, httpGet, waitForProcessOnline } from './test-utils.js';
+import { httpGet, orkify, sleep, waitForProcessOnline } from './test-utils.js';
 
 describe('Error Handling', () => {
   it('fails gracefully for non-existent script', () => {

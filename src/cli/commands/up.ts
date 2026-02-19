@@ -1,16 +1,16 @@
-import { cpus } from 'node:os';
-import { resolve } from 'node:path';
 import chalk from 'chalk';
 import { Command } from 'commander';
+import { cpus } from 'node:os';
+import { resolve } from 'node:path';
+import type { ProcessInfo, UpPayload } from '../../types/index.js';
 import {
   DEFAULT_LOG_MAX_AGE,
   DEFAULT_LOG_MAX_FILES,
   DEFAULT_LOG_MAX_SIZE,
-  MIN_LOG_MAX_SIZE,
   IPCMessageType,
+  MIN_LOG_MAX_SIZE,
 } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-import type { ProcessInfo, UpPayload } from '../../types/index.js';
 
 /**
  * Parse workers option:

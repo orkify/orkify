@@ -14,8 +14,7 @@
  * - ORKIFY_STICKY: Whether to use sticky sessions
  */
 
-import cluster from 'node:cluster';
-import type { Worker } from 'node:cluster';
+import cluster, { type Worker } from 'node:cluster';
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:net';
 import { METRICS_PROBE_IMPORT } from '../constants.js';
@@ -61,7 +60,7 @@ const freeSlots = new Set<number>();
 let isShuttingDown = false;
 let isReloading = false;
 const reloadCandidateWorkerIds = new Set<number>(); // cluster worker.id values of temp replacement workers
-let stickyServer: Server | null = null;
+let stickyServer: null | Server = null;
 
 function log(message: string): void {
   const timestamp = new Date().toISOString();
@@ -197,7 +196,7 @@ function setupCluster(): void {
   });
 }
 
-function findWorkerState(worker: Worker): WorkerState | undefined {
+function findWorkerState(worker: Worker): undefined | WorkerState {
   for (const state of workers.values()) {
     if (state.worker === worker) {
       return state;
@@ -293,7 +292,7 @@ async function stopWorker(state: WorkerState): Promise<void> {
 
 interface SlotResult {
   slotId: number;
-  status: 'success' | 'failed' | 'stale';
+  status: 'failed' | 'stale' | 'success';
   retries: number;
   error?: string;
 }
@@ -555,7 +554,7 @@ function setupStickyServer(port: number): void {
   });
 }
 
-function extractSessionId(buffer: Buffer): string | null {
+function extractSessionId(buffer: Buffer): null | string {
   const data = buffer.toString('utf8', 0, Math.min(buffer.length, 2048));
 
   // Custom sticky_id parameter (recommended for explicit sticky routing)

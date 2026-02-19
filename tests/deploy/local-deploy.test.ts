@@ -2,24 +2,24 @@ import { execSync } from 'node:child_process';
 import EventEmitter from 'node:events';
 import {
   existsSync,
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
-  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ORKIFY_CONFIG_FILE, DEPLOY_META_FILE } from '../../src/constants.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DeployCommand, DeployOptions, ReconcileResult } from '../../src/types/index.js';
+import { DEPLOY_META_FILE, ORKIFY_CONFIG_FILE } from '../../src/constants.js';
 import { getOrkifyConfig } from '../../src/deploy/config.js';
 import { DeployExecutor } from '../../src/deploy/DeployExecutor.js';
 import { parseEnvFile } from '../../src/deploy/env.js';
 import { createTarball } from '../../src/deploy/tarball.js';
-import type { DeployCommand, DeployOptions, ReconcileResult } from '../../src/types/index.js';
 
 const ORKIFY_YML_MINIMAL = `version: 1
 deploy:

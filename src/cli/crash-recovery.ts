@@ -1,7 +1,7 @@
+import type { McpStartPayload, ProcessConfig } from '../types/index.js';
 import { IPCMessageType } from '../constants.js';
 import { DaemonClient } from '../ipc/DaemonClient.js';
 import { restoreDaemon } from '../ipc/restoreDaemon.js';
-import type { McpStartPayload, ProcessConfig } from '../types/index.js';
 
 async function main() {
   const raw = process.env.ORKIFY_CRASH_RECOVERY;

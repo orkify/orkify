@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
+  validateLogsOptions,
   validateStartOptions,
   validateTarget,
-  validateLogsOptions,
 } from '../../src/config/schema.js';
 
 describe('Config Schema', () => {

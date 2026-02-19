@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { IPCMessageType } from '../../src/constants.js';
 import {
+  createMessageParser,
   createRequest,
   createResponse,
   serialize,
-  createMessageParser,
 } from '../../src/ipc/protocol.js';
 
 describe('IPC Protocol', () => {

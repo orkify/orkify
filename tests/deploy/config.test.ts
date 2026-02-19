@@ -1,20 +1,20 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+import type { SavedState } from '../../src/types/index.js';
 import { ORKIFY_CONFIG_FILE } from '../../src/constants.js';
 import {
-  getOrkifyConfig,
-  saveOrkifyConfig,
-  readPackageJson,
-  detectPackageManager,
+  collectGitMetadata,
   detectBuildCommand,
   detectEntryPoint,
-  collectGitMetadata,
+  detectPackageManager,
+  getOrkifyConfig,
   interactiveConfig,
+  readPackageJson,
+  saveOrkifyConfig,
 } from '../../src/deploy/config.js';
-import type { SavedState } from '../../src/types/index.js';
 
 vi.mock('node:readline', () => ({
   createInterface: vi.fn(),

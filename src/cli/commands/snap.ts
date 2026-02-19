@@ -1,8 +1,8 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
+import type { SnapPayload } from '../../types/index.js';
 import { IPCMessageType, SNAPSHOT_FILE } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-import type { SnapPayload } from '../../types/index.js';
 
 export const snapCommand = new Command('snap')
   .description('Snapshot current process list for later restoration')

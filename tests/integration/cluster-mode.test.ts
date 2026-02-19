@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { EXAMPLES, spawnOrkify } from './setup.js';
-import { httpGet, sleep, waitForWorkersOnline, orkify, orkifyWithEnv } from './test-utils.js';
+import { httpGet, orkify, orkifyWithEnv, sleep, waitForWorkersOnline } from './test-utils.js';
 
 describe('Cluster Mode', () => {
   const appName = 'test-cluster';

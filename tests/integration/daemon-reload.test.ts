@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ORKIFY_HOME } from './setup.js';
-import { httpGet, waitForDaemonKilled, waitForWorkersOnline, orkify } from './test-utils.js';
+import { httpGet, orkify, waitForDaemonKilled, waitForWorkersOnline } from './test-utils.js';
 
 describe('daemon-reload', () => {
   let tempDir: string;

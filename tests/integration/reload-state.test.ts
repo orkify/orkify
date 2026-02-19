@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { httpGet, sleep, waitForHttpReady, waitForProcessOnline, orkify } from './test-utils.js';
+import { httpGet, orkify, sleep, waitForHttpReady, waitForProcessOnline } from './test-utils.js';
 
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
@@ -48,7 +48,7 @@ function extractProcessLines(list: string, name: string): string[] {
 function parseCounters(
   list: string,
   name: string,
-  mode: 'fork' | 'cluster'
+  mode: 'cluster' | 'fork'
 ): { restarts: number; errors: number } {
   const stripped = stripAnsi(list);
   const match = stripped.match(new RegExp(`${name}\\s*│\\s*${mode}\\s*│\\s*(\\d+)\\s*│\\s*(\\d+)`));

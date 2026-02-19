@@ -1,20 +1,20 @@
-import { cpus } from 'node:os';
-import { resolve } from 'node:path';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { cpus } from 'node:os';
+import { resolve } from 'node:path';
 import { z } from 'zod';
+import type {
+  LogsPayload,
+  ProcessInfo,
+  RestorePayload,
+  SnapPayload,
+  TargetPayload,
+  UpPayload,
+} from '../types/index.js';
 import { IPCMessageType } from '../constants.js';
 import { DaemonClient } from '../ipc/DaemonClient.js';
-import { listAllUsers, isElevated } from '../ipc/MultiUserClient.js';
-import type {
-  ProcessInfo,
-  LogsPayload,
-  UpPayload,
-  TargetPayload,
-  SnapPayload,
-  RestorePayload,
-} from '../types/index.js';
+import { isElevated, listAllUsers } from '../ipc/MultiUserClient.js';
 
 // Shared IPC client for all MCP sessions. DaemonClient is stateless per-request,
 // so concurrent tool calls from different sessions safely share a single instance.
@@ -85,7 +85,7 @@ function parseWorkers(value: number | undefined): number {
 export function checkToolAccess(
   toolName: string,
   authInfo?: AuthInfo
-): { allowed: true } | { allowed: false; error: ReturnType<typeof formatError> } {
+): { allowed: false; error: ReturnType<typeof formatError> } | { allowed: true } {
   if (!authInfo) return { allowed: true }; // stdio mode — no auth
   if (authInfo.scopes.includes('*')) return { allowed: true };
   if (authInfo.scopes.includes(toolName)) return { allowed: true };

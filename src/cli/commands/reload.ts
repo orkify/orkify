@@ -1,8 +1,8 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
+import type { ProcessInfo, TargetPayload } from '../../types/index.js';
 import { IPCMessageType } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-import type { ProcessInfo, TargetPayload } from '../../types/index.js';
 
 export const reloadCommand = new Command('reload')
   .description('Zero-downtime reload - rolling restart of workers')

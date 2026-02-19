@@ -18,7 +18,6 @@ import {
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { ORKIFY_DEPLOYS_DIR, DEPLOY_META_FILE, DEPLOY_CRASH_WINDOW_DEFAULT } from '../constants.js';
 import type { Orchestrator } from '../daemon/Orchestrator.js';
 import type { TelemetryReporter } from '../telemetry/TelemetryReporter.js';
 import type {
@@ -27,6 +26,7 @@ import type {
   DeployStatus,
   TelemetryConfig,
 } from '../types/index.js';
+import { DEPLOY_CRASH_WINDOW_DEFAULT, DEPLOY_META_FILE, ORKIFY_DEPLOYS_DIR } from '../constants.js';
 import { getOrkifyConfig } from './config.js';
 
 export class DeployExecutor {
@@ -109,7 +109,7 @@ export class DeployExecutor {
       }
 
       // 6. Swap symlink
-      let previousDir: string | null = null;
+      let previousDir: null | string = null;
       if (existsSync(currentLink)) {
         try {
           previousDir = readlinkSync(currentLink);
@@ -351,7 +351,7 @@ export class DeployExecutor {
     }
   }
 
-  private cleanupOldReleases(releasesDir: string, keep: number, preserveDir: string | null): void {
+  private cleanupOldReleases(releasesDir: string, keep: number, preserveDir: null | string): void {
     try {
       const entries = readdirSync(releasesDir)
         .filter((e) => statSync(join(releasesDir, e)).isDirectory())

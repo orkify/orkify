@@ -1,10 +1,10 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ProcessConfig, UpPayload } from '../../src/types/index.js';
 import { ExecMode } from '../../src/constants.js';
 import { Orchestrator } from '../../src/daemon/Orchestrator.js';
-import type { ProcessConfig, UpPayload } from '../../src/types/index.js';
 
 // Allow per-test mocking of cpus() for workers:0 tests
 vi.mock('node:os', async (importOriginal) => {

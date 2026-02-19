@@ -3,13 +3,13 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { parse, stringify } from 'yaml';
+import type { DeploySettings, ProcessConfig, SavedState } from '../types/index.js';
 import {
   DEFAULT_LOG_MAX_AGE,
   DEFAULT_LOG_MAX_FILES,
   DEFAULT_LOG_MAX_SIZE,
   ORKIFY_CONFIG_FILE,
 } from '../constants.js';
-import type { DeploySettings, ProcessConfig, SavedState } from '../types/index.js';
 
 interface PackageManager {
   name: string;
@@ -29,7 +29,7 @@ export function detectPackageManager(projectDir: string): PackageManager {
 export function detectBuildCommand(
   packageJson: Record<string, unknown>,
   pm: PackageManager
-): string | null {
+): null | string {
   const scripts = packageJson.scripts as Record<string, string> | undefined;
   if (scripts?.build) return `${pm.name} run build`;
   return null;
@@ -66,13 +66,13 @@ export function readPackageJson(projectDir: string): Record<string, unknown> {
   return JSON.parse(readFileSync(pkgPath, 'utf-8'));
 }
 
-export function getOrkifyConfig(projectDir: string): SavedState | null {
+export function getOrkifyConfig(projectDir: string): null | SavedState {
   const configPath = join(projectDir, ORKIFY_CONFIG_FILE);
   if (!existsSync(configPath)) return null;
 
   try {
     const content = readFileSync(configPath, 'utf-8');
-    const raw = parse(content) as SavedState | null;
+    const raw = parse(content) as null | SavedState;
     if (!raw) return null;
     return raw;
   } catch {

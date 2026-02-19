@@ -1,13 +1,13 @@
 import { EventEmitter } from 'node:events';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import {
-  TELEMETRY_MAX_BATCH_SIZE,
-  TELEMETRY_LOG_RING_SIZE,
-  TELEMETRY_LOG_FLUSH_MAX_LINES,
-} from '../../src/constants.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Orchestrator } from '../../src/daemon/Orchestrator.js';
-import { TelemetryReporter } from '../../src/telemetry/TelemetryReporter.js';
 import type { ProcessInfo } from '../../src/types/index.js';
+import {
+  TELEMETRY_LOG_FLUSH_MAX_LINES,
+  TELEMETRY_LOG_RING_SIZE,
+  TELEMETRY_MAX_BATCH_SIZE,
+} from '../../src/constants.js';
+import { TelemetryReporter } from '../../src/telemetry/TelemetryReporter.js';
 
 function createMockOrchestrator() {
   const emitter = new EventEmitter();

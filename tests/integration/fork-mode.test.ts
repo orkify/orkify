@@ -4,13 +4,13 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { EXAMPLES, ORKIFY_HOME } from './setup.js';
 import {
   httpGet,
+  orkify,
+  orkifyWithEnv,
   waitForDaemonKilled,
   waitForHttpReady,
   waitForProcessOnline,
   waitForProcessRemoved,
   waitForProcessStopped,
-  orkify,
-  orkifyWithEnv,
 } from './test-utils.js';
 
 describe('Fork Mode', () => {

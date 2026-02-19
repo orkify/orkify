@@ -1,6 +1,6 @@
-import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TOOL_NAMES } from '../../src/mcp/auth.js';
 import { orkify, waitForProcessOnline, waitForWorkersOnline } from './test-utils.js';

@@ -1,8 +1,8 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
+import type { ProcessInfo, TargetPayload } from '../../types/index.js';
 import { IPCMessageType } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-import type { ProcessInfo, TargetPayload } from '../../types/index.js';
 
 export const restartCommand = new Command('restart')
   .description('Restart process(es) - hard restart (kill + start)')

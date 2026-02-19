@@ -13,6 +13,7 @@ import type { SavedState } from '../../src/types/index.js';
 import { ORKIFY_HOME } from './setup.js';
 import {
   httpGet,
+  orkify,
   sleep,
   waitForDaemonKilled,
   waitForHttpReady,
@@ -20,7 +21,6 @@ import {
   waitForProcessRemoved,
   waitForProcessStopped,
   waitForWorkersOnline,
-  orkify,
 } from './test-utils.js';
 
 describe('Fork Mode Reload', () => {

@@ -1,8 +1,8 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
+import type { TargetPayload } from '../../types/index.js';
 import { IPCMessageType } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-import type { TargetPayload } from '../../types/index.js';
 
 export const flushCommand = new Command('flush')
   .description('Truncate log files and remove rotated archives')

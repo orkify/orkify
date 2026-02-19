@@ -1,18 +1,18 @@
-import { fork, type ChildProcess } from 'node:child_process';
+import { type FSWatcher, watch } from 'chokidar';
+import { type ChildProcess, fork } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { watch, type FSWatcher } from 'chokidar';
 import pidusage from 'pidusage';
+import type { ProcessConfig, ProcessInfo, WorkerInfo } from '../types/index.js';
 import {
-  ProcessStatus,
   ExecMode,
+  LAUNCH_TIMEOUT,
   LOGS_DIR,
   METRICS_PROBE_IMPORT,
-  LAUNCH_TIMEOUT,
+  ProcessStatus,
 } from '../constants.js';
-import type { ProcessConfig, ProcessInfo, WorkerInfo } from '../types/index.js';
 import { RotatingWriter } from './RotatingWriter.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -52,8 +52,8 @@ export class ManagedProcess extends EventEmitter {
   private slotCrashes = new Map<number, number>();
 
   private launchTimers = new Map<number, NodeJS.Timeout>();
-  private outWriter: RotatingWriter | null = null;
-  private errWriter: RotatingWriter | null = null;
+  private outWriter: null | RotatingWriter = null;
+  private errWriter: null | RotatingWriter = null;
   private watcher: FSWatcher | null = null;
   private isShuttingDown = false;
   private isReloading = false;
@@ -362,7 +362,7 @@ export class ManagedProcess extends EventEmitter {
 
         case 'worker:listening': {
           const listeningWorkerId = msg.workerId as number;
-          const addr = msg.address as { port?: number } | undefined;
+          const addr = msg.address as undefined | { port?: number };
           if (addr?.port && !this.detectedPort) {
             this.detectedPort = addr.port;
           }
@@ -408,8 +408,8 @@ export class ManagedProcess extends EventEmitter {
           }
           this.emit('worker:exit', {
             workerId: exitedWorkerId,
-            code: msg.code as number | null,
-            signal: msg.signal as string | null,
+            code: msg.code as null | number,
+            signal: msg.signal as null | string,
           });
           break;
         }
@@ -441,7 +441,7 @@ export class ManagedProcess extends EventEmitter {
 
         case 'worker:output': {
           const outputWorkerId = msg.workerId as number;
-          const outputStream = msg.stream as 'out' | 'err';
+          const outputStream = msg.stream as 'err' | 'out';
           const outputData = msg.data as string;
           this.handleLog(outputStream, outputWorkerId, Buffer.from(outputData));
           break;
@@ -613,7 +613,7 @@ export class ManagedProcess extends EventEmitter {
     throw new Error(`Health check failed: ${url}`);
   }
 
-  private handleLog(type: 'out' | 'err', workerId: number, data: Buffer): void {
+  private handleLog(type: 'err' | 'out', workerId: number, data: Buffer): void {
     const line = data.toString();
     const timestamp = new Date().toISOString();
     const workerLabel = workerId === -1 ? 'primary' : workerId;

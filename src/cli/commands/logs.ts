@@ -1,8 +1,8 @@
+import chalk from 'chalk';
+import { Command } from 'commander';
 import { createReadStream, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import chalk from 'chalk';
-import { Command } from 'commander';
 import { LOGS_DIR } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
 

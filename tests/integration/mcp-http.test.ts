@@ -1,11 +1,11 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { stringify as stringifyYaml } from 'yaml';
 import { MCP_TOKEN_PREFIX } from '../../src/constants.js';
-import { sleep, orkify, orkifyWithEnv } from './test-utils.js';
+import { orkify, orkifyWithEnv, sleep } from './test-utils.js';
 
 const IS_CI = process.env.CI === 'true';
 

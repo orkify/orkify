@@ -1,14 +1,5 @@
 import { EventEmitter } from 'node:events';
 import { arch, cpus, hostname, platform, totalmem } from 'node:os';
-import {
-  TELEMETRY_METRICS_INTERVAL,
-  TELEMETRY_FLUSH_TIMEOUT,
-  TELEMETRY_MAX_BATCH_SIZE,
-  TELEMETRY_REQUEST_TIMEOUT,
-  TELEMETRY_LOG_RING_SIZE,
-  TELEMETRY_LOG_FLUSH_MAX_LINES,
-  TELEMETRY_LOG_MAX_LINE_LENGTH,
-} from '../constants.js';
 import type { Orchestrator } from '../daemon/Orchestrator.js';
 import type {
   DeployStatus,
@@ -21,6 +12,15 @@ import type {
   TelemetryMetricsSnapshot,
   TelemetryPayload,
 } from '../types/index.js';
+import {
+  TELEMETRY_FLUSH_TIMEOUT,
+  TELEMETRY_LOG_FLUSH_MAX_LINES,
+  TELEMETRY_LOG_MAX_LINE_LENGTH,
+  TELEMETRY_LOG_RING_SIZE,
+  TELEMETRY_MAX_BATCH_SIZE,
+  TELEMETRY_METRICS_INTERVAL,
+  TELEMETRY_REQUEST_TIMEOUT,
+} from '../constants.js';
 
 export class TelemetryReporter extends EventEmitter {
   private config: TelemetryConfig;
@@ -31,7 +31,7 @@ export class TelemetryReporter extends EventEmitter {
   private logRings = new Map<string, Map<number, string[]>>();
   private logFlushBuffer: TelemetryLogEntry[] = [];
   private logFlushDropped = 0;
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: null | ReturnType<typeof setInterval> = null;
   private hostName: string;
   private hostInfo: TelemetryHostInfo;
   private _deployStatus: DeployStatus | null = null;
@@ -93,7 +93,7 @@ export class TelemetryReporter extends EventEmitter {
 
     this.orchestrator.on(
       'worker:exit',
-      (data: { processName: string; workerId: number; code: number; signal: string | null }) => {
+      (data: { processName: string; workerId: number; code: number; signal: null | string }) => {
         if (data.code !== 0 && data.code !== null) {
           const lastLogs = this.getWorkerLogs(data.processName, data.workerId);
           this.pushEvent('worker:crash', data.processName, {
@@ -149,7 +149,7 @@ export class TelemetryReporter extends EventEmitter {
             : data.data;
         // Detect level: stderr defaults to error, but downgrade to warn if the
         // line contains warn/warning without error (e.g. console.warn output)
-        let level: 'info' | 'warn' | 'error' = data.type === 'err' ? 'error' : 'info';
+        let level: 'error' | 'info' | 'warn' = data.type === 'err' ? 'error' : 'info';
         if (level === 'error') {
           const prefix = line.slice(0, 80).toLowerCase();
           if (/\bwarn(ing)?\b/.test(prefix) && !/\berror\b/.test(prefix)) {

@@ -1,19 +1,16 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { cpus } from 'node:os';
-import { resolve } from 'node:path';
 import chalk from 'chalk';
 import { Command } from 'commander';
+import { cpus } from 'node:os';
+import { resolve } from 'node:path';
+import type { McpStartPayload, ProcessInfo, UpPayload } from '../../types/index.js';
 import {
-  DAEMON_PID_FILE,
-  SOCKET_PATH,
   DEFAULT_LOG_MAX_AGE,
   DEFAULT_LOG_MAX_FILES,
   DEFAULT_LOG_MAX_SIZE,
   MCP_DEFAULT_PORT,
   MIN_LOG_MAX_SIZE,
 } from '../../constants.js';
-import { startDaemon, type DaemonContext } from '../../daemon/startDaemon.js';
-import type { McpStartPayload, ProcessInfo, UpPayload } from '../../types/index.js';
+import { type DaemonContext, startDaemon } from '../../daemon/startDaemon.js';
 
 /**
  * Parse workers option:
@@ -68,20 +65,6 @@ function parseSize(value: string): number {
 }
 
 /**
- * Check if a daemon is already running (PID file exists and process is alive).
- */
-function isDaemonRunning(): boolean {
-  if (!existsSync(DAEMON_PID_FILE)) return false;
-  try {
-    const pid = parseInt(readFileSync(DAEMON_PID_FILE, 'utf-8').trim(), 10);
-    process.kill(pid, 0); // signal 0 = check if alive
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Run command - runs process in foreground with full daemon features
  * Designed for container environments like Docker/Kubernetes
  * Ideal for Docker/Kubernetes where process runs as PID 1
@@ -125,17 +108,6 @@ export const runCommand = new Command('run')
   .option('--mcp-cors <origin>', 'MCP CORS setting')
   .option('--silent', 'Suppress startup messages')
   .action(async (script: string, options) => {
-    // Check for conflicting daemon/run instance
-    if (isDaemonRunning() || existsSync(SOCKET_PATH)) {
-      console.error(
-        chalk.red(
-          '✗ Another daemon or orkify run instance is already active.\n' +
-            '  Stop it first with `orkify kill` or wait for it to exit.'
-        )
-      );
-      process.exit(1);
-    }
-
     const cwd = options.cwd || process.cwd();
     const scriptPath = resolve(cwd, script);
     const workerCount = parseWorkers(options.workers);
@@ -148,17 +120,23 @@ export const runCommand = new Command('run')
       'app';
     const silent = options.silent || false;
 
-    // Start daemon stack in-process (foreground mode)
+    // Start daemon stack in-process (foreground mode).
+    // startDaemon() acquires an exclusive PID lock — if another daemon
+    // or orkify-run instance is active, it throws.
     let ctx: DaemonContext;
     try {
       ctx = await startDaemon({ foreground: true, skipTimestampPrefix: true });
     } catch (err) {
-      console.error(chalk.red(`✗ Failed to initialize daemon: ${(err as Error).message}`));
+      const msg = (err as Error).message;
+      if (msg.includes('already running')) {
+        console.error(
+          chalk.red(`✗ ${msg}\n` + '  Stop it first with `orkify kill` or wait for it to exit.')
+        );
+      } else {
+        console.error(chalk.red(`✗ Failed to initialize daemon: ${msg}`));
+      }
       process.exit(1);
     }
-
-    // Write PID file and start IPC server
-    writeFileSync(DAEMON_PID_FILE, String(process.pid), 'utf-8');
 
     try {
       await ctx.startServer();
@@ -259,7 +237,7 @@ export const runCommand = new Command('run')
     if (managedProcess) {
       managedProcess.on(
         'process:finished',
-        (data: { code: number | null; signal: string | null }) => {
+        (data: { code: null | number; signal: null | string }) => {
           if (shuttingDown) return;
 
           if (data.signal) {

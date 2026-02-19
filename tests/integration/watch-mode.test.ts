@@ -1,17 +1,17 @@
 import {
+  appendFileSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
   writeFileSync,
-  appendFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  orkify,
   httpGet,
+  orkify,
   waitForProcessOnline,
   waitForProcessRemoved,
   waitForProcessRestart,

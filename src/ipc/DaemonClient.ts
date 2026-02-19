@@ -1,36 +1,36 @@
 import { spawn } from 'node:child_process';
 import {
-  existsSync,
-  readFileSync,
-  openSync,
-  writeFileSync,
   closeSync,
-  unlinkSync,
+  existsSync,
   mkdirSync,
+  openSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { connect, type Socket } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { IPCMessage, IPCRequest, IPCResponse } from '../types/index.js';
 import {
-  SOCKET_PATH,
-  DAEMON_PID_FILE,
   DAEMON_LOCK_FILE,
   DAEMON_LOG_FILE,
-  ORKIFY_HOME,
+  DAEMON_PID_FILE,
+  DAEMON_STARTUP_TIMEOUT,
   IPC_CONNECT_TIMEOUT,
   IPC_RESPONSE_TIMEOUT,
-  DAEMON_STARTUP_TIMEOUT,
   IPCMessageType,
+  ORKIFY_HOME,
+  SOCKET_PATH,
   TELEMETRY_DEFAULT_API_HOST,
 } from '../constants.js';
-import type { IPCRequest, IPCResponse, IPCMessage } from '../types/index.js';
-import { createRequest, serialize, createMessageParser } from './protocol.js';
+import { createMessageParser, createRequest, serialize } from './protocol.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export class DaemonClient {
-  private socket: Socket | null = null;
+  private socket: null | Socket = null;
   private messageParser = createMessageParser();
   private pendingRequests = new Map<
     string,
@@ -254,7 +254,7 @@ export class DaemonClient {
   }
 
   async streamLogs(
-    target: string | number | undefined,
+    target: number | string | undefined,
     onData: (data: unknown) => void
   ): Promise<() => void> {
     await this.connect();

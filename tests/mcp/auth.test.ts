@@ -1,20 +1,20 @@
-import { chmodSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
-import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
-import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { stringify as stringifyYaml } from 'yaml';
 import { MCP_TOKEN_PREFIX } from '../../src/constants.js';
 import {
+  appendKeyToConfig,
+  generateToken,
+  isIpAllowed,
   loadMcpConfig,
   LocalConfigVerifier,
-  generateToken,
-  appendKeyToConfig,
-  warnIfConfigInsecure,
   normalizeIp,
-  isIpAllowed,
   TOOL_NAMES,
+  warnIfConfigInsecure,
 } from '../../src/mcp/auth.js';
 import { checkToolAccess } from '../../src/mcp/server.js';
 

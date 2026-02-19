@@ -1,20 +1,20 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ProcessConfig } from '../../src/types/index.js';
 import {
-  ExecMode,
+  DEFAULT_LOG_MAX_AGE,
+  DEFAULT_LOG_MAX_FILES,
+  DEFAULT_LOG_MAX_SIZE,
   DEFAULT_MAX_RESTARTS,
   DEFAULT_MIN_UPTIME,
-  DEFAULT_RESTART_DELAY,
   DEFAULT_RELOAD_RETRIES,
-  DEFAULT_LOG_MAX_SIZE,
-  DEFAULT_LOG_MAX_FILES,
-  DEFAULT_LOG_MAX_AGE,
+  DEFAULT_RESTART_DELAY,
+  ExecMode,
   KILL_TIMEOUT,
 } from '../../src/constants.js';
 import { Orchestrator } from '../../src/daemon/Orchestrator.js';
-import type { ProcessConfig } from '../../src/types/index.js';
 
 describe('Orchestrator.reconcile', () => {
   let tempDir: string;

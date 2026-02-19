@@ -5,12 +5,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { IS_WINDOWS } from './setup.js';
 import {
   httpGet,
+  orkify,
   sleep,
   waitForHttpReady,
   waitForProcessOnline,
   waitForProcessRemoved,
   waitForProcessStopped,
-  orkify,
 } from './test-utils.js';
 
 describe('Graceful Shutdown', () => {

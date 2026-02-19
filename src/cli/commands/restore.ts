@@ -1,15 +1,15 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import chalk from 'chalk';
 import { Command } from 'commander';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { DeployRestorePayload, ProcessInfo, RestorePayload } from '../../types/index.js';
 import {
+  DEPLOY_META_FILE,
   IPCMessageType,
   ORKIFY_DEPLOYS_DIR,
-  DEPLOY_META_FILE,
   TELEMETRY_DEFAULT_API_HOST,
 } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-import type { DeployRestorePayload, ProcessInfo, RestorePayload } from '../../types/index.js';
 
 export const restoreCommand = new Command('restore')
   .description('Restore previously saved process list')

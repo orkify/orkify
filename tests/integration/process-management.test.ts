@@ -5,11 +5,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { EXAMPLES } from './setup.js';
 import {
   httpGet,
+  orkify,
   waitForDaemonKilled,
   waitForHttpReady,
   waitForProcessOnline,
   waitForProcessStopped,
-  orkify,
 } from './test-utils.js';
 
 describe('Process Management Edge Cases', () => {

@@ -165,7 +165,7 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     proc.kill('SIGTERM');
 
-    const exitCode = await new Promise<number | null>((resolve) => {
+    const exitCode = await new Promise<null | number>((resolve) => {
       proc.on('exit', (code) => resolve(code));
       setTimeout(() => resolve(null), 5000);
     });
@@ -186,7 +186,7 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     proc.kill('SIGINT');
 
-    const exitCode = await new Promise<number | null>((resolve) => {
+    const exitCode = await new Promise<null | number>((resolve) => {
       proc.on('exit', (code) => resolve(code));
       setTimeout(() => resolve(null), 5000);
     });
@@ -207,7 +207,7 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     proc.kill('SIGHUP');
 
-    const exitCode = await new Promise<number | null>((resolve) => {
+    const exitCode = await new Promise<null | number>((resolve) => {
       proc.on('exit', (code) => resolve(code));
       setTimeout(() => resolve(null), 5000);
     });
@@ -287,7 +287,7 @@ describe('Run Command (Foreground/Container Mode)', () => {
     const startTime = Date.now();
     proc.kill('SIGTERM');
 
-    const exitCode = await new Promise<number | null>((resolve) => {
+    const exitCode = await new Promise<null | number>((resolve) => {
       proc.on('exit', (code) => resolve(code));
       setTimeout(() => resolve(null), 15000);
     });
@@ -328,7 +328,7 @@ describe('Run Command (Foreground/Container Mode)', () => {
       detached: false,
     });
 
-    const exitCode = await new Promise<number | null>((resolve) => {
+    const exitCode = await new Promise<null | number>((resolve) => {
       proc.on('exit', (code) => resolve(code));
       setTimeout(() => resolve(null), 10000);
     });
@@ -352,7 +352,7 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     proc.kill('SIGTERM');
 
-    const exitCode = await new Promise<number | null>((resolve) => {
+    const exitCode = await new Promise<null | number>((resolve) => {
       proc.on('exit', (code) => resolve(code));
       setTimeout(() => resolve(null), 10000);
     });
@@ -442,7 +442,7 @@ describe('Run Command (Foreground/Container Mode)', () => {
       detached: false,
     });
 
-    const exitCode = await new Promise<number | null>((resolve) => {
+    const exitCode = await new Promise<null | number>((resolve) => {
       proc.on('exit', (code) => resolve(code));
       setTimeout(() => resolve(null), 10000);
     });
@@ -469,14 +469,14 @@ describe('Run Command (Foreground/Container Mode)', () => {
     proc2.stdout?.on('data', (d: Buffer) => (proc2Output += d.toString()));
     proc2.stderr?.on('data', (d: Buffer) => (proc2Output += d.toString()));
 
-    const exitCode2 = await new Promise<number | null>((resolve) => {
+    const exitCode2 = await new Promise<null | number>((resolve) => {
       proc2.on('exit', (code) => resolve(code));
       setTimeout(() => resolve(null), 5000);
     });
 
     // Second instance should exit with error
     expect(exitCode2).toBe(1);
-    expect(proc2Output).toContain('already active');
+    expect(proc2Output).toContain('already running');
 
     // Clean up first instance
     proc1.kill('SIGTERM');
@@ -585,7 +585,7 @@ describe('Run Command (Foreground/Container Mode)', () => {
     );
 
     // Should eventually exit after max restarts are exhausted
-    const exitCode = await new Promise<number | null>((resolve) => {
+    const exitCode = await new Promise<null | number>((resolve) => {
       proc.on('exit', (code) => resolve(code));
       setTimeout(() => resolve(null), 30000);
     });

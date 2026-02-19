@@ -1,8 +1,8 @@
 import { spawn as spawnChild } from 'node:child_process';
-import { writeFileSync, openSync } from 'node:fs';
+import { openSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DAEMON_PID_FILE, DAEMON_LOG_FILE } from '../constants.js';
+import { DAEMON_LOG_FILE } from '../constants.js';
 import { startDaemon } from './startDaemon.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -10,9 +10,6 @@ const __dirname = dirname(__filename);
 
 const ctx = await startDaemon({ foreground: false });
 const { orchestrator, gracefulShutdown, cleanup } = ctx;
-
-// Write PID file
-writeFileSync(DAEMON_PID_FILE, String(process.pid), 'utf-8');
 
 /**
  * Spawn a detached crash-recovery process that will start a new daemon

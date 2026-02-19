@@ -1,15 +1,15 @@
+import ig, { type Ignore } from 'ignore';
 import {
   createWriteStream,
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   statSync,
 } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
-import ig, { type Ignore } from 'ignore';
 import { pack } from 'tar-stream';
 import { ORKIFY_HOME } from '../constants.js';
 
@@ -31,7 +31,7 @@ interface IgnoreFilter {
 }
 
 /** Walk up from startDir looking for a .git directory. */
-function findGitRoot(startDir: string): string | null {
+function findGitRoot(startDir: string): null | string {
   let dir = startDir;
   for (;;) {
     if (existsSync(join(dir, '.git'))) return dir;

@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs';
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { stringify, parse } from 'yaml';
+import { parse, stringify } from 'yaml';
+import type { McpStartPayload, ProcessConfig, SavedState } from '../types/index.js';
 import { validateMcpState } from '../config/schema.js';
 import { SNAPSHOT_FILE } from '../constants.js';
-import type { McpStartPayload, ProcessConfig, SavedState } from '../types/index.js';
 
 const STATE_VERSION = 1;
 

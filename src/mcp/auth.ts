@@ -1,10 +1,10 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync, watchFile } from 'node:fs';
-import { BlockList, isIPv4 } from 'node:net';
-import { dirname } from 'node:path';
-import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import type { OAuthTokenVerifier } from '@modelcontextprotocol/sdk/server/auth/provider.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
+import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, statSync, watchFile, writeFileSync } from 'node:fs';
+import { BlockList, isIPv4 } from 'node:net';
+import { dirname } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import { MCP_CONFIG_FILE, MCP_TOKEN_PREFIX } from '../constants.js';

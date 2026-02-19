@@ -1,34 +1,42 @@
-import { mkdirSync, existsSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
 import {
-  ORKIFY_HOME,
-  ORKIFY_DEPLOYS_DIR,
-  DAEMON_PID_FILE,
-  SOCKET_PATH,
-  IPCMessageType,
-  TELEMETRY_DEFAULT_API_HOST,
-} from '../constants.js';
-import { CommandPoller } from '../deploy/CommandPoller.js';
-import { getOrkifyConfig } from '../deploy/config.js';
-import { DeployExecutor } from '../deploy/DeployExecutor.js';
-import { DaemonServer, type ClientConnection } from '../ipc/DaemonServer.js';
-import { createResponse } from '../ipc/protocol.js';
-import { startMcpHttpServer, type McpHttpServer } from '../mcp/http.js';
-import { TelemetryReporter } from '../telemetry/TelemetryReporter.js';
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  unlinkSync,
+  writeSync,
+} from 'node:fs';
+import { join } from 'node:path';
 import type {
   DeployCommand,
   DeployLocalPayload,
   DeployOptions,
   DeployRestorePayload,
   DeploySettings,
-  McpStartPayload,
-  UpPayload,
-  TargetPayload,
   LogsPayload,
-  SnapPayload,
-  RestorePayload,
+  McpStartPayload,
   ProcessConfig,
+  RestorePayload,
+  SnapPayload,
+  TargetPayload,
+  UpPayload,
 } from '../types/index.js';
+import {
+  DAEMON_PID_FILE,
+  IPCMessageType,
+  ORKIFY_DEPLOYS_DIR,
+  ORKIFY_HOME,
+  SOCKET_PATH,
+  TELEMETRY_DEFAULT_API_HOST,
+} from '../constants.js';
+import { CommandPoller } from '../deploy/CommandPoller.js';
+import { getOrkifyConfig } from '../deploy/config.js';
+import { DeployExecutor } from '../deploy/DeployExecutor.js';
+import { type ClientConnection, DaemonServer } from '../ipc/DaemonServer.js';
+import { createResponse } from '../ipc/protocol.js';
+import { type McpHttpServer, startMcpHttpServer } from '../mcp/http.js';
+import { TelemetryReporter } from '../telemetry/TelemetryReporter.js';
 import { Orchestrator } from './Orchestrator.js';
 
 export interface DaemonOptions {
@@ -41,7 +49,7 @@ export interface DaemonOptions {
 export interface DaemonContext {
   orchestrator: Orchestrator;
   server: DaemonServer;
-  telemetry: TelemetryReporter | null;
+  telemetry: null | TelemetryReporter;
   startMcpHttp: (opts: McpStartPayload) => Promise<void>;
   getMcpOptions: () => McpStartPayload | null;
   gracefulShutdown: () => Promise<void>;
@@ -51,6 +59,50 @@ export interface DaemonContext {
   /** Mark that server.stop()/cleanup() should be skipped during shutdown
    * (e.g. because crash recovery already cleaned up the socket). */
   markSkipServerStop: () => void;
+}
+
+/**
+ * Acquire an exclusive lock on the PID file using O_EXCL (atomic create).
+ * Keeps the fd open for the process lifetime so the PID file's existence
+ * reliably indicates a running daemon. Returns the open fd.
+ *
+ * If the PID file already exists, checks whether the holder is still alive.
+ * Stale PID files (dead holder) are removed and re-acquired.
+ *
+ * Throws if another daemon is genuinely running.
+ */
+function acquirePidLock(): number {
+  try {
+    const fd = openSync(DAEMON_PID_FILE, 'wx'); // O_CREAT | O_EXCL | O_WRONLY
+    writeSync(fd, String(process.pid));
+    return fd;
+  } catch {
+    // PID file exists — check if the holder is still alive
+    let holderPid: number;
+    try {
+      holderPid = parseInt(readFileSync(DAEMON_PID_FILE, 'utf-8').trim(), 10);
+      process.kill(holderPid, 0); // throws if process is dead
+    } catch (e) {
+      // Holder is dead or PID file is unreadable — stale lock, take over
+      if (e instanceof Error && 'code' in e && (e as NodeJS.ErrnoException).code === 'EPERM') {
+        // EPERM means the process exists but we can't signal it (different user)
+        throw new Error(
+          'Another daemon is already running (cannot signal PID, permission denied)',
+          { cause: e }
+        );
+      }
+      try {
+        unlinkSync(DAEMON_PID_FILE);
+        const fd = openSync(DAEMON_PID_FILE, 'wx');
+        writeSync(fd, String(process.pid));
+        return fd;
+      } catch {
+        throw new Error('Failed to acquire daemon lock (race with another process)');
+      }
+    }
+
+    throw new Error(`Another daemon is already running (PID ${holderPid})`);
+  }
 }
 
 export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonContext> {
@@ -75,10 +127,13 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
     mkdirSync(ORKIFY_HOME, { recursive: true });
   }
 
+  // Acquire exclusive PID lock — throws if another daemon is running
+  const pidLockFd = acquirePidLock();
+
   const orchestrator = new Orchestrator();
   const server = new DaemonServer();
 
-  let telemetry: TelemetryReporter | null = null;
+  let telemetry: null | TelemetryReporter = null;
   const apiKey = process.env.ORKIFY_API_KEY;
   if (apiKey) {
     const apiHost = process.env.ORKIFY_API_HOST || TELEMETRY_DEFAULT_API_HOST;
@@ -458,8 +513,13 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
     return createResponse(request.id, true, { crashing: true });
   });
 
-  // Cleanup PID file and socket
+  // Release PID lock and clean up socket
   function cleanup() {
+    try {
+      closeSync(pidLockFd);
+    } catch {
+      // Ignore — may already be closed
+    }
     try {
       if (existsSync(DAEMON_PID_FILE)) {
         unlinkSync(DAEMON_PID_FILE);

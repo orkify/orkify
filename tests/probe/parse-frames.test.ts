@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { parseUserFrames, type StackFrame } from '../../src/probe/parse-frames.js';
 
 const CWD = '/project';

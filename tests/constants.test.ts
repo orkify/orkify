@@ -1,15 +1,15 @@
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  ORKIFY_HOME,
-  SOCKET_PATH,
-  SNAPSHOT_FILE,
   DAEMON_PID_FILE,
-  LOGS_DIR,
-  ProcessStatus,
   ExecMode,
   IPCMessageType,
+  LOGS_DIR,
+  ORKIFY_HOME,
+  ProcessStatus,
+  SNAPSHOT_FILE,
+  SOCKET_PATH,
 } from '../src/constants.js';
 
 describe('Constants', () => {

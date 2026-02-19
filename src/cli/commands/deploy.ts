@@ -1,3 +1,5 @@
+import chalk from 'chalk';
+import { Command } from 'commander';
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -12,8 +14,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import chalk from 'chalk';
-import { Command } from 'commander';
+import type { DeployLocalPayload } from '../../types/index.js';
 import { IPCMessageType, ORKIFY_CONFIG_FILE, TELEMETRY_DEFAULT_API_HOST } from '../../constants.js';
 import {
   collectGitMetadata,
@@ -25,7 +26,6 @@ import {
 import { parseEnvFile } from '../../deploy/env.js';
 import { createTarball } from '../../deploy/tarball.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-import type { DeployLocalPayload } from '../../types/index.js';
 
 export const deployCommand = new Command('deploy').description('Deployment commands');
 
