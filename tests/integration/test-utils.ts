@@ -1,5 +1,5 @@
 import { execSync, spawn } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 
@@ -261,11 +261,23 @@ export async function waitForProcessRemoved(name: string, maxWait = 10000): Prom
 }
 
 /**
- * Wait until the daemon is killed (socket/pipe removed).
+ * Wait until the daemon is killed (socket/pipe removed AND process dead).
  * Note: Can't use orkify list because that would auto-start the daemon.
  */
 export async function waitForDaemonKilled(maxWait = 5000): Promise<void> {
   const start = Date.now();
+
+  // Read daemon PID before waiting — we'll verify it's dead after the
+  // socket/pipe disappears to avoid races on Windows where the pipe closes
+  // before the process fully exits.
+  let daemonPid: null | number = null;
+  const pidFile = join(homedir(), '.orkify', 'daemon.pid');
+  try {
+    daemonPid = parseInt(readFileSync(pidFile, 'utf-8').trim(), 10);
+    if (Number.isNaN(daemonPid)) daemonPid = null;
+  } catch {
+    // No PID file — daemon may already be gone
+  }
 
   if (process.platform === 'win32') {
     // On Windows, check if the Named Pipe still exists
@@ -275,25 +287,38 @@ export async function waitForDaemonKilled(maxWait = 5000): Promise<void> {
       try {
         const pipes = readdirSync('\\\\.\\pipe');
         if (!pipes.includes(pipeName)) {
-          return;
+          break;
         }
       } catch {
         // Pipe directory not readable, assume daemon is gone
-        return;
+        break;
       }
       await sleep(50);
     }
-    throw new Error(`Daemon pipe still exists after ${maxWait}ms`);
+    if (Date.now() - start >= maxWait) {
+      throw new Error(`Daemon pipe still exists after ${maxWait}ms`);
+    }
   } else {
     // On Unix, check if the socket file still exists
     const socketPath = join(homedir(), '.orkify', 'orkify.sock');
     while (Date.now() - start < maxWait) {
       if (!existsSync(socketPath)) {
-        return;
+        break;
       }
       await sleep(50);
     }
-    throw new Error(`Daemon socket still exists after ${maxWait}ms`);
+    if (Date.now() - start >= maxWait) {
+      throw new Error(`Daemon socket still exists after ${maxWait}ms`);
+    }
+  }
+
+  // Also wait for the daemon process to fully exit — on Windows the pipe
+  // can disappear before the process finishes cleanup.
+  if (daemonPid) {
+    const remaining = maxWait - (Date.now() - start);
+    if (remaining > 0) {
+      await waitForPidDead(daemonPid, remaining);
+    }
   }
 }
 
