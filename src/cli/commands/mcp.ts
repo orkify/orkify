@@ -20,9 +20,9 @@ export const mcpCommand = new Command('mcp')
   .addOption(new Option('--bind <address>', 'HTTP bind address').default('127.0.0.1'))
   .addOption(
     new Option(
-      '--cors <origin>',
+      '--cors [origin]',
       'Enable CORS ("*" for any origin, a specific URL, or comma-separated URLs)'
-    )
+    ).preset('*')
   )
   .action(async (opts) => {
     try {

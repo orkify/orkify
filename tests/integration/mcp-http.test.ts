@@ -787,7 +787,7 @@ async function startIsolatedServer(
 
   const serverPort = await findFreePort();
   const env = { HOME: dir, USERPROFILE: dir };
-  const quotedArgs = extraArgs.map((a) => (a.includes('*') ? `'${a}'` : a)).join(' ');
+  const quotedArgs = extraArgs.join(' ');
   orkifyWithEnv(`mcp --simple-http --port ${serverPort} --bind 127.0.0.1 ${quotedArgs}`, env);
 
   await waitForServer(serverPort);
@@ -857,13 +857,13 @@ describe('MCP HTTP graceful shutdown', () => {
 });
 
 describe('MCP HTTP CORS', () => {
-  describe('--cors "*"', () => {
+  describe('--cors (wildcard)', () => {
     let corsPort: number;
     let dir: string;
     let env: Record<string, string>;
 
     beforeAll(async () => {
-      ({ serverPort: corsPort, dir, env } = await startIsolatedServer(['--cors', '*']));
+      ({ serverPort: corsPort, dir, env } = await startIsolatedServer(['--cors']));
     }, 15000);
 
     afterAll(async () => {

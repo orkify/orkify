@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { cpus } from 'node:os';
 import { resolve } from 'node:path';
 import type { McpStartPayload, ProcessInfo, UpPayload } from '../../types/index.js';
@@ -105,7 +105,9 @@ export const runCommand = new Command('run')
   .option('--mcp-simple-http', 'Start MCP HTTP server (local key auth)')
   .option('--mcp-port <port>', 'MCP HTTP port', String(MCP_DEFAULT_PORT))
   .option('--mcp-bind <address>', 'MCP bind address', '127.0.0.1')
-  .option('--mcp-cors <origin>', 'MCP CORS setting')
+  .addOption(
+    new Option('--mcp-cors [origin]', 'MCP CORS setting ("*" if no origin given)').preset('*')
+  )
   .option('--silent', 'Suppress startup messages')
   .action(async (script: string, options) => {
     const cwd = options.cwd || process.cwd();
