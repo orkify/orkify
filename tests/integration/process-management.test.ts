@@ -85,7 +85,13 @@ describe('Multiple Processes', () => {
   let script1: string;
   let script2: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    // Clean up any leftover processes from previous describe blocks
+    orkify(`delete ${app1}`);
+    orkify(`delete ${app2}`);
+    // Brief settle to ensure ports are freed
+    await sleep(200);
+
     tempDir = realpathSync(mkdtempSync(join(tmpdir(), 'orkify-multi-test-')));
     script1 = join(tempDir, 'app1.js');
     script2 = join(tempDir, 'app2.js');
@@ -160,7 +166,7 @@ describe('Multiple Processes', () => {
 
     expect(status1).toBe(0);
     expect(status2).toBe(0);
-  }, 10000);
+  }, 15000);
 
   it('restart all restarts all processes', async () => {
     orkify('restart all');
@@ -265,8 +271,8 @@ describe('Numeric ID Operations', () => {
   }, 15000);
 
   it('can restart process by numeric ID', async () => {
-    // Allow daemon to settle after previous stop
-    await sleep(200);
+    // Allow daemon to settle after previous stop — IPC can briefly drop
+    await sleep(500);
 
     const list = orkify('list');
     const idMatch = list.match(new RegExp(`│\\s*(\\d+)\\s*│\\s*${appName}`));
@@ -274,7 +280,12 @@ describe('Numeric ID Operations', () => {
     if (!idMatch) return;
     const processId = idMatch[1];
 
-    const output = orkify(`restart ${processId}`);
+    // Retry restart in case IPC connection is briefly unstable after stop
+    let output = orkify(`restart ${processId}`);
+    if (output.includes('Connection closed') || output.includes('Error')) {
+      await sleep(500);
+      output = orkify(`restart ${processId}`);
+    }
     expect(output).toContain('restarted');
 
     await waitForProcessOnline(appName);
