@@ -313,12 +313,11 @@ export async function waitForDaemonKilled(maxWait = 5000): Promise<void> {
   }
 
   // Also wait for the daemon process to fully exit — on Windows the pipe
-  // can disappear before the process finishes cleanup.
+  // can disappear before the process finishes cleanup. Use at least 10s
+  // for the PID wait regardless of how much time was spent on the socket.
   if (daemonPid) {
     const remaining = maxWait - (Date.now() - start);
-    if (remaining > 0) {
-      await waitForPidDead(daemonPid, remaining);
-    }
+    await waitForPidDead(daemonPid, Math.max(remaining, 10000));
   }
 }
 
