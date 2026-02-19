@@ -179,7 +179,15 @@ API_KEY=secret-key-123`
       }
     );
 
-    await waitForHttpReady('http://localhost:3018/', 20000);
+    // Capture stderr so failures are visible in CI logs
+    let stderr = '';
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    await waitForHttpReady('http://localhost:3018/', 20000).catch((err) => {
+      throw new Error(`${(err as Error).message}\norkify run stderr: ${stderr}`);
+    });
 
     const { status, body } = await httpGet('http://localhost:3018/');
     expect(status).toBe(200);
