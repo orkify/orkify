@@ -75,35 +75,48 @@ describe('Log Rotation', () => {
       await sleep(100);
     }
 
-    // Wait for rotation and compression to complete
-    await sleep(1500);
-
-    // Check that the current log file exists
+    // Wait for rotation and compression to complete.
+    // Poll for .gz archives instead of fixed sleep — gzip can be slow on CI.
     const currentLog = join(logsDir, `${appName}.stdout.log`);
+    let gzArchives: string[] = [];
+    const rotationDeadline = Date.now() + 10000;
+    while (Date.now() < rotationDeadline) {
+      await sleep(200);
+      if (!existsSync(logsDir)) continue;
+      const files = readdirSync(logsDir);
+      gzArchives = files.filter((f) => f.startsWith(`${appName}.stdout.log-`) && f.endsWith('.gz'));
+      if (gzArchives.length > 0) break;
+    }
+
     expect(existsSync(currentLog)).toBe(true);
-
-    // Check for rotated archives
-    const files = readdirSync(logsDir);
-    const gzArchives = files.filter(
-      (f) => f.startsWith(`${appName}.stdout.log-`) && f.endsWith('.gz')
-    );
-
     expect(gzArchives.length).toBeGreaterThan(0);
 
-    // Verify the .gz file is valid gzip
+    // Wait briefly for gzip to finish writing the file
+    await sleep(500);
+
+    // Verify the .gz file is valid gzip (retry once if still being written)
     const firstArchive = join(logsDir, gzArchives[0]);
-    const chunks: Buffer[] = [];
-    await pipeline(
-      createReadStream(firstArchive),
-      createGunzip(),
-      new Writable({
-        write(chunk, _enc, cb) {
-          chunks.push(chunk);
-          cb();
-        },
-      })
-    );
-    const content = Buffer.concat(chunks).toString();
+    let content = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const chunks: Buffer[] = [];
+        await pipeline(
+          createReadStream(firstArchive),
+          createGunzip(),
+          new Writable({
+            write(chunk, _enc, cb) {
+              chunks.push(chunk);
+              cb();
+            },
+          })
+        );
+        content = Buffer.concat(chunks).toString();
+        break;
+      } catch {
+        // gzip file may still be written — wait and retry
+        await sleep(500);
+      }
+    }
     expect(content.length).toBeGreaterThan(0);
 
     // Current file should be smaller than max size (freshly rotated)
