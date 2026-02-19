@@ -1,11 +1,19 @@
-import { fork, spawn } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import { LAUNCH_TIMEOUT } from '../../constants.js';
+import {
+  DAEMON_PID_FILE,
+  SOCKET_PATH,
+  DEFAULT_LOG_MAX_AGE,
+  DEFAULT_LOG_MAX_FILES,
+  DEFAULT_LOG_MAX_SIZE,
+  MCP_DEFAULT_PORT,
+  MIN_LOG_MAX_SIZE,
+} from '../../constants.js';
+import { startDaemon, type DaemonContext } from '../../daemon/startDaemon.js';
+import type { McpStartPayload, ProcessInfo, UpPayload } from '../../types/index.js';
 
 /**
  * Parse workers option:
@@ -28,16 +36,58 @@ function parseWorkers(value: string): number {
   return num;
 }
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const CLUSTER_WRAPPER_PATH = join(__dirname, '..', '..', 'cluster', 'ClusterWrapper.js');
+/**
+ * Parse human-readable size string to bytes.
+ * Supports: 100M, 500K, 1G, or raw byte count.
+ */
+function parseSize(value: string): number {
+  const match = value.match(/^(\d+(?:\.\d+)?)\s*([kmg]?)b?$/i);
+  let bytes: number;
+  if (!match) {
+    const num = parseInt(value, 10);
+    bytes = isNaN(num) ? DEFAULT_LOG_MAX_SIZE : num;
+  } else {
+    const num = parseFloat(match[1]);
+    const unit = match[2].toLowerCase();
+    switch (unit) {
+      case 'k':
+        bytes = Math.round(num * 1024);
+        break;
+      case 'm':
+        bytes = Math.round(num * 1024 * 1024);
+        break;
+      case 'g':
+        bytes = Math.round(num * 1024 * 1024 * 1024);
+        break;
+      default:
+        bytes = Math.round(num);
+        break;
+    }
+  }
+  return Math.max(bytes, MIN_LOG_MAX_SIZE);
+}
 
 /**
- * Run command - runs process in foreground (no daemon)
+ * Check if a daemon is already running (PID file exists and process is alive).
+ */
+function isDaemonRunning(): boolean {
+  if (!existsSync(DAEMON_PID_FILE)) return false;
+  try {
+    const pid = parseInt(readFileSync(DAEMON_PID_FILE, 'utf-8').trim(), 10);
+    process.kill(pid, 0); // signal 0 = check if alive
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run command - runs process in foreground with full daemon features
  * Designed for container environments like Docker/Kubernetes
  * Ideal for Docker/Kubernetes where process runs as PID 1
  */
 export const runCommand = new Command('run')
-  .description('Run a process in foreground (no daemon, for containers)')
+  .description('Run a process in foreground (for containers) with full daemon features')
   .argument('<script>', 'Script file to run')
   .option('-n, --name <name>', 'Process name')
   .option('-w, --workers <number>', 'Number of workers (0 = CPU cores, -1 = CPUs-1)', '1')
@@ -48,9 +98,46 @@ export const runCommand = new Command('run')
   .option('--port <port>', 'Port for sticky session routing (required with --sticky)')
   .option('--kill-timeout <ms>', 'Time to wait for graceful shutdown before SIGKILL', '5000')
   .option('--reload-retries <count>', 'Retries per worker slot during reload (0-3)', '3')
+  .option('--max-restarts <count>', 'Maximum restart attempts (default 0 in run mode)', '0')
+  .option('--min-uptime <ms>', 'Minimum uptime before restart counts', '1000')
+  .option('--restart-delay <ms>', 'Delay between restarts', '100')
+  .option('--watch', 'Watch for file changes and reload')
+  .option('--watch-paths <paths...>', 'Specific paths to watch')
+  .option('--health-check <path>', 'Health check endpoint path (e.g. /health)')
+  .option(
+    '--log-max-size <size>',
+    'Max log file size before rotation (e.g. 100M, 500K, 1G)',
+    String(DEFAULT_LOG_MAX_SIZE)
+  )
+  .option(
+    '--log-max-files <count>',
+    'Rotated log files to keep (0 = no rotation)',
+    String(DEFAULT_LOG_MAX_FILES)
+  )
+  .option(
+    '--log-max-age <days>',
+    'Delete rotated log files older than N days (0 = no age limit)',
+    String(DEFAULT_LOG_MAX_AGE / (24 * 60 * 60 * 1000))
+  )
+  .option('--mcp-simple-http', 'Start MCP HTTP server (local key auth)')
+  .option('--mcp-port <port>', 'MCP HTTP port', String(MCP_DEFAULT_PORT))
+  .option('--mcp-bind <address>', 'MCP bind address', '127.0.0.1')
+  .option('--mcp-cors <origin>', 'MCP CORS setting')
   .option('--silent', 'Suppress startup messages')
   .action(async (script: string, options) => {
-    const scriptPath = resolve(options.cwd || process.cwd(), script);
+    // Check for conflicting daemon/run instance
+    if (isDaemonRunning() || existsSync(SOCKET_PATH)) {
+      console.error(
+        chalk.red(
+          '✗ Another daemon or orkify run instance is already active.\n' +
+            '  Stop it first with `orkify kill` or wait for it to exit.'
+        )
+      );
+      process.exit(1);
+    }
+
+    const cwd = options.cwd || process.cwd();
+    const scriptPath = resolve(cwd, script);
     const workerCount = parseWorkers(options.workers);
     const name =
       options.name ||
@@ -59,196 +146,165 @@ export const runCommand = new Command('run')
         .pop()
         ?.replace(/\.[^.]+$/, '') ||
       'app';
-    const cwd = options.cwd || process.cwd();
-    const nodeArgs = options.nodeArgs ? options.nodeArgs.split(/\s+/) : [];
-    const scriptArgs = options.args ? options.args.split(/\s+/) : [];
-    const sticky = options.sticky || false;
-    const port = options.port ? parseInt(options.port, 10) : undefined;
-    const killTimeout = parseInt(options.killTimeout, 10);
     const silent = options.silent || false;
 
+    // Start daemon stack in-process (foreground mode)
+    let ctx: DaemonContext;
+    try {
+      ctx = await startDaemon({ foreground: true, skipTimestampPrefix: true });
+    } catch (err) {
+      console.error(chalk.red(`✗ Failed to initialize daemon: ${(err as Error).message}`));
+      process.exit(1);
+    }
+
+    // Write PID file and start IPC server
+    writeFileSync(DAEMON_PID_FILE, String(process.pid), 'utf-8');
+
+    try {
+      await ctx.startServer();
+    } catch (err) {
+      console.error(chalk.red(`✗ Failed to start IPC server: ${(err as Error).message}`));
+      ctx.cleanup();
+      process.exit(1);
+    }
+
+    // Start MCP HTTP server if requested
+    if (options.mcpSimpleHttp) {
+      try {
+        const mcpPayload: McpStartPayload = {
+          transport: 'simple-http',
+          port: parseInt(options.mcpPort, 10),
+          bind: options.mcpBind,
+          cors: options.mcpCors,
+        };
+        await ctx.startMcpHttp(mcpPayload);
+        if (!silent) {
+          console.log(
+            chalk.cyan(`[orkify] MCP HTTP server → ${options.mcpBind}:${options.mcpPort}`)
+          );
+        }
+      } catch (err) {
+        console.error(chalk.yellow(`[orkify] MCP HTTP server failed: ${(err as Error).message}`));
+      }
+    }
+
+    // Build UpPayload and start the process via orchestrator
+    const payload: UpPayload = {
+      script: scriptPath,
+      name,
+      workers: workerCount,
+      watch: options.watch || false,
+      watchPaths: options.watchPaths,
+      cwd,
+      env: process.env as Record<string, string>,
+      nodeArgs: options.nodeArgs ? options.nodeArgs.split(/\s+/) : [],
+      args: options.args ? options.args.split(/\s+/) : [],
+      killTimeout: parseInt(options.killTimeout, 10),
+      maxRestarts: parseInt(options.maxRestarts, 10),
+      minUptime: parseInt(options.minUptime, 10),
+      restartDelay: parseInt(options.restartDelay, 10),
+      sticky: options.sticky || false,
+      port: options.port ? parseInt(options.port, 10) : undefined,
+      reloadRetries: parseInt(options.reloadRetries, 10),
+      healthCheck: options.healthCheck,
+      logMaxSize: parseSize(options.logMaxSize),
+      logMaxFiles: parseInt(options.logMaxFiles, 10),
+      logMaxAge: parseInt(options.logMaxAge, 10) * 24 * 60 * 60 * 1000,
+    };
+
+    let info: ProcessInfo;
+    try {
+      info = await ctx.orchestrator.up(payload);
+    } catch (err) {
+      console.error(chalk.red(`✗ Failed to start process: ${(err as Error).message}`));
+      await ctx.gracefulShutdown();
+      process.exit(1);
+    }
+
     if (!silent) {
-      console.log(chalk.cyan(`[orkify] Starting ${name} in foreground mode`));
+      console.log(chalk.cyan(`[orkify] Starting ${info.name} in foreground mode`));
       if (workerCount > 1) {
         console.log(chalk.cyan(`[orkify] Cluster mode: ${workerCount} workers`));
       }
-      if (sticky) {
-        console.log(chalk.cyan(`[orkify] Sticky sessions: port ${port}`));
+      if (options.sticky) {
+        console.log(chalk.cyan(`[orkify] Sticky sessions: port ${options.port}`));
+      }
+      if (ctx.telemetry) {
+        console.log(chalk.cyan(`[orkify] Telemetry enabled`));
       }
     }
 
-    let child: ChildProcess;
-    let isShuttingDown = false;
-    let killTimer: NodeJS.Timeout | null = null;
-
-    if (workerCount > 1) {
-      // Cluster mode - use ClusterWrapper
-      // process.env already includes vars from Node's --env-file if used
-      const env: Record<string, string> = {
-        ...(process.env as Record<string, string>),
-        ORKIFY_SCRIPT: scriptPath,
-        ORKIFY_WORKERS: String(workerCount),
-        ORKIFY_PROCESS_NAME: name,
-        ORKIFY_PROCESS_ID: '0',
-        ORKIFY_KILL_TIMEOUT: String(killTimeout),
-        ORKIFY_STICKY: String(sticky),
-        ORKIFY_RELOAD_RETRIES: options.reloadRetries,
-      };
-
-      if (sticky && port) {
-        env.ORKIFY_STICKY_PORT = String(port);
+    // Forward process output to stdout/stderr (foreground mode shows output directly)
+    ctx.orchestrator.on('log', (data: { type: string; data: string }) => {
+      if (data.type === 'err') {
+        process.stderr.write(data.data);
+      } else {
+        process.stdout.write(data.data);
       }
+    });
 
-      child = fork(CLUSTER_WRAPPER_PATH, [], {
-        cwd,
-        env,
-        stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-        execArgv: nodeArgs,
-      });
-    } else {
-      // Fork mode - run script directly
-      // process.env already includes vars from Node's --env-file if used
-      const env: Record<string, string> = {
-        ...(process.env as Record<string, string>),
-        ORKIFY_PROCESS_ID: '0',
-        ORKIFY_PROCESS_NAME: name,
-        ORKIFY_WORKER_ID: '0',
-        ORKIFY_CLUSTER_MODE: 'false',
-        ORKIFY_WORKERS: '1',
-        ORKIFY_STICKY: String(sticky),
-      };
+    // Track exit code from the primary process
+    let exitCode = 0;
+    let shuttingDown = false;
 
-      child = spawn(process.execPath, [...nodeArgs, scriptPath, ...scriptArgs], {
-        cwd,
-        env,
-        stdio: 'inherit',
-      });
+    async function shutdown(code: number): Promise<never> {
+      if (shuttingDown) return undefined as never;
+      shuttingDown = true;
+      await ctx.gracefulShutdown();
+      process.exit(code);
     }
 
-    // Graceful shutdown handler
-    const shutdown = (signal: NodeJS.Signals) => {
-      if (isShuttingDown) return; // Prevent double shutdown
-      isShuttingDown = true;
+    // Wait for primary process to reach terminal state
+    const managedProcess = ctx.orchestrator.getProcess(info.name);
+    if (managedProcess) {
+      managedProcess.on(
+        'process:finished',
+        (data: { code: number | null; signal: string | null }) => {
+          if (shuttingDown) return;
 
+          if (data.signal) {
+            const signalNum =
+              data.signal === 'SIGTERM'
+                ? 15
+                : data.signal === 'SIGINT'
+                  ? 2
+                  : data.signal === 'SIGHUP'
+                    ? 1
+                    : 9;
+            exitCode = 128 + signalNum;
+          } else {
+            exitCode = data.code ?? 0;
+          }
+
+          if (!silent && exitCode !== 0) {
+            console.log(chalk.red(`[orkify] Process exited with code ${exitCode}`));
+          }
+
+          // Use setTimeout to let any pending I/O flush
+          setTimeout(() => void shutdown(exitCode), 100);
+        }
+      );
+    }
+
+    // Signal handlers
+    const handleSignal = (signal: string) => {
       if (!silent) {
         console.log(chalk.yellow(`\n[orkify] Received ${signal}, shutting down...`));
       }
-
-      // Forward signal to child
-      child.kill(signal);
-
-      // Set up kill timeout - force kill if child doesn't exit
-      killTimer = setTimeout(() => {
-        if (!silent) {
-          console.log(chalk.red(`[orkify] Kill timeout (${killTimeout}ms), forcing exit...`));
-        }
-        child.kill('SIGKILL');
-      }, killTimeout);
+      void shutdown(0);
     };
 
-    // Forward signals to child
-    process.on('SIGINT', () => shutdown('SIGINT'));
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGHUP', () => shutdown('SIGHUP'));
+    process.on('SIGINT', () => handleSignal('SIGINT'));
+    process.on('SIGTERM', () => handleSignal('SIGTERM'));
+    process.on('SIGHUP', () => handleSignal('SIGHUP'));
 
-    // Handle child exit
-    child.on('exit', (code, signal) => {
-      if (killTimer) {
-        clearTimeout(killTimer);
-      }
-
-      if (signal) {
-        if (!silent) {
-          console.log(chalk.yellow(`[orkify] Process killed by ${signal}`));
-        }
-        // Exit with 128 + signal number (standard convention)
-        const signalNum =
-          signal === 'SIGTERM' ? 15 : signal === 'SIGINT' ? 2 : signal === 'SIGHUP' ? 1 : 9;
-        process.exit(128 + signalNum);
-      } else {
-        if (!silent && code !== 0) {
-          console.log(chalk.red(`[orkify] Process exited with code ${code}`));
-        }
-        process.exit(code ?? 0);
-      }
+    process.on('uncaughtException', async (err) => {
+      console.error('Uncaught exception:', err);
+      await shutdown(1);
     });
 
-    child.on('error', (err) => {
-      console.error(chalk.red(`[orkify] Process error: ${err.message}`));
-      process.exit(1);
+    process.on('unhandledRejection', async (reason) => {
+      console.error('Unhandled rejection:', reason);
+      await shutdown(1);
     });
-
-    // Handle cluster mode IPC messages
-    if (workerCount > 1) {
-      const launchTimers = new Map<number, NodeJS.Timeout>();
-      const readyWorkers = new Set<number>();
-
-      const clearLaunchTimer = (workerId: number) => {
-        const timer = launchTimers.get(workerId);
-        if (timer) {
-          clearTimeout(timer);
-          launchTimers.delete(workerId);
-        }
-      };
-
-      const startLaunchTimer = (workerId: number) => {
-        clearLaunchTimer(workerId);
-        const timer = setTimeout(() => {
-          launchTimers.delete(workerId);
-          if (!readyWorkers.has(workerId)) {
-            console.error(
-              chalk.red(
-                `[orkify] Worker ${workerId} failed to start — not listening and no ready signal after ${LAUNCH_TIMEOUT / 1000}s.\n` +
-                  `  Common causes:\n` +
-                  `  - Application crashed or hung during startup\n` +
-                  `  - Running a dev server in cluster mode (e.g., Next.js dev with -w 0)\n` +
-                  `  - Missing process.send('ready') for apps that don't bind a port`
-              )
-            );
-          }
-        }, LAUNCH_TIMEOUT);
-        launchTimers.set(workerId, timer);
-      };
-
-      child.on('message', (msg: unknown) => {
-        const message = msg as { type?: string; workerId?: number };
-        const wid = message.workerId ?? -1;
-        switch (message.type) {
-          case 'primary:ready':
-            if (!silent) {
-              console.log(chalk.green('[orkify] Cluster ready'));
-            }
-            break;
-          case 'worker:online':
-            startLaunchTimer(wid);
-            break;
-          case 'worker:listening':
-          case 'worker:ready':
-            clearLaunchTimer(wid);
-            readyWorkers.add(wid);
-            break;
-          case 'worker:exit':
-            clearLaunchTimer(wid);
-            readyWorkers.delete(wid);
-            break;
-        }
-      });
-
-      // Clean up timers on shutdown
-      const origShutdown = shutdown;
-      const shutdownWithTimerCleanup = (signal: NodeJS.Signals) => {
-        for (const timer of launchTimers.values()) {
-          clearTimeout(timer);
-        }
-        launchTimers.clear();
-        origShutdown(signal);
-      };
-      // Replace signal handlers
-      process.removeAllListeners('SIGINT');
-      process.removeAllListeners('SIGTERM');
-      process.removeAllListeners('SIGHUP');
-      process.on('SIGINT', () => shutdownWithTimerCleanup('SIGINT'));
-      process.on('SIGTERM', () => shutdownWithTimerCleanup('SIGTERM'));
-      process.on('SIGHUP', () => shutdownWithTimerCleanup('SIGHUP'));
-    }
   });

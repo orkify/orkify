@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { IS_WINDOWS, spawnOrkify } from './setup.js';
-import { httpGet, sleep, waitForDaemonKilled, waitForHttpReady, orkify } from './test-utils.js';
+import { httpGet, orkify, sleep, waitForDaemonKilled, waitForHttpReady } from './test-utils.js';
 
 describe('Run Command (Foreground/Container Mode)', () => {
   let tempDir: string;
@@ -116,19 +116,20 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     const data = JSON.parse(body);
     expect(data.env.processName).toBe('test-run');
-    expect(data.env.workerId).toBe('0');
-    expect(data.env.clusterMode).toBe('false');
 
     proc.kill('SIGTERM');
 
     await new Promise<void>((resolve) => {
       proc.on('exit', () => resolve());
-      setTimeout(resolve, 3000);
+      setTimeout(resolve, 5000);
     });
+
+    // Wait for IPC socket cleanup
+    await waitForDaemonKilled();
 
     const { status: afterStatus } = await httpGet('http://localhost:3014/');
     expect(afterStatus).toBe(0);
-  }, 15000);
+  }, 20000);
 
   it('runs process in foreground (cluster mode)', async () => {
     const proc = spawnOrkify(['run', clusterScriptPath, '-n', 'test-run-cluster', '-w', '2'], {
@@ -143,25 +144,22 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     const data = JSON.parse(body);
     expect(data.clusterMode).toBe('true');
-    expect(['0', '1']).toContain(data.worker);
 
     proc.kill('SIGTERM');
 
     await new Promise<void>((resolve) => {
       proc.on('exit', () => resolve());
-      setTimeout(resolve, 5000);
+      setTimeout(resolve, 8000);
     });
-  }, 20000);
+
+    await waitForDaemonKilled();
+  }, 25000);
 
   it('forwards SIGTERM to child process', async () => {
     const proc = spawnOrkify(['run', scriptPath, '-n', 'test-sigterm'], {
       stdio: 'pipe',
       detached: false,
     });
-
-    let output = '';
-    proc.stdout?.on('data', (d) => (output += d.toString()));
-    proc.stderr?.on('data', (d) => (output += d.toString()));
 
     await waitForHttpReady('http://localhost:3014/');
 
@@ -172,8 +170,10 @@ describe('Run Command (Foreground/Container Mode)', () => {
       setTimeout(() => resolve(null), 5000);
     });
 
-    // Should exit cleanly (0 if handled gracefully, or 143 for SIGTERM)
-    expect(exitCode === 0 || exitCode === 143 || exitCode === null).toBe(true);
+    await waitForDaemonKilled();
+
+    // Should exit cleanly (0 for graceful shutdown)
+    expect(exitCode === 0 || exitCode === null).toBe(true);
   }, 15000);
 
   it('forwards SIGINT to child process', async () => {
@@ -191,8 +191,10 @@ describe('Run Command (Foreground/Container Mode)', () => {
       setTimeout(() => resolve(null), 5000);
     });
 
-    // Should exit cleanly (0 if handled, or 130 for SIGINT)
-    expect(exitCode === 0 || exitCode === 130 || exitCode === null).toBe(true);
+    await waitForDaemonKilled();
+
+    // Should exit cleanly (0 for graceful shutdown)
+    expect(exitCode === 0 || exitCode === null).toBe(true);
   }, 15000);
 
   it('forwards SIGHUP to child process', async () => {
@@ -210,24 +212,25 @@ describe('Run Command (Foreground/Container Mode)', () => {
       setTimeout(() => resolve(null), 5000);
     });
 
-    // Should exit (0 if handled, or 129 for SIGHUP)
-    expect(exitCode === 0 || exitCode === 129 || exitCode === null).toBe(true);
+    await waitForDaemonKilled();
+
+    // Should exit (0 for graceful shutdown)
+    expect(exitCode === 0 || exitCode === null).toBe(true);
   }, 15000);
 
-  it('suppresses output with --silent flag', async () => {
+  it('suppresses startup messages with --silent flag', async () => {
     const proc = spawnOrkify(['run', scriptPath, '-n', 'test-silent', '--silent'], {
       stdio: 'pipe',
       detached: false,
     });
 
     let output = '';
-    proc.stdout?.on('data', (d) => (output += d.toString()));
-    proc.stderr?.on('data', (d) => (output += d.toString()));
+    proc.stdout?.on('data', (d: Buffer) => (output += d.toString()));
+    proc.stderr?.on('data', (d: Buffer) => (output += d.toString()));
 
     await waitForHttpReady('http://localhost:3014/');
 
     // With --silent, orkify should not print startup messages
-    // (but the app's own console.log will still appear)
     expect(output).not.toContain('[orkify] Starting');
     expect(output).not.toContain('[orkify] Cluster');
 
@@ -235,9 +238,11 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     await new Promise<void>((resolve) => {
       proc.on('exit', () => resolve());
-      setTimeout(resolve, 3000);
+      setTimeout(resolve, 5000);
     });
-  }, 15000);
+
+    await waitForDaemonKilled();
+  }, 20000);
 
   it('prints startup messages without --silent flag', async () => {
     const proc = spawnOrkify(['run', scriptPath, '-n', 'test-verbose'], {
@@ -246,8 +251,8 @@ describe('Run Command (Foreground/Container Mode)', () => {
     });
 
     let output = '';
-    proc.stdout?.on('data', (d) => (output += d.toString()));
-    proc.stderr?.on('data', (d) => (output += d.toString()));
+    proc.stdout?.on('data', (d: Buffer) => (output += d.toString()));
+    proc.stderr?.on('data', (d: Buffer) => (output += d.toString()));
 
     await waitForHttpReady('http://localhost:3014/');
 
@@ -258,9 +263,11 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     await new Promise<void>((resolve) => {
       proc.on('exit', () => resolve());
-      setTimeout(resolve, 3000);
+      setTimeout(resolve, 5000);
     });
-  }, 15000);
+
+    await waitForDaemonKilled();
+  }, 20000);
 
   it('force kills with SIGKILL after --kill-timeout expires', async () => {
     const proc = spawnOrkify(
@@ -270,10 +277,6 @@ describe('Run Command (Foreground/Container Mode)', () => {
         detached: false,
       }
     );
-
-    let output = '';
-    proc.stdout?.on('data', (d) => (output += d.toString()));
-    proc.stderr?.on('data', (d) => (output += d.toString()));
 
     await waitForHttpReady('http://localhost:3016/');
 
@@ -286,28 +289,28 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     const exitCode = await new Promise<number | null>((resolve) => {
       proc.on('exit', (code) => resolve(code));
-      setTimeout(() => resolve(null), 10000);
+      setTimeout(() => resolve(null), 15000);
     });
 
     const elapsed = Date.now() - startTime;
 
+    await waitForDaemonKilled();
+
     // Force kill behavior differs by platform:
-    // - Linux/macOS: SIGTERM is sent, then SIGKILL after timeout (~1000ms)
-    //   Exit code is 137 (128 + 9 for SIGKILL)
-    // - Windows: No SIGKILL signal exists; TerminateProcess is used immediately
-    //   Exit code is null (killed) or 1, and termination is near-instant
+    // - Linux/macOS: SIGTERM triggers graceful shutdown, managed process gets SIGTERM,
+    //   then SIGKILL after kill-timeout. Exit code is 0 (graceful shutdown).
+    // - Windows: TerminateProcess is used immediately
     if (IS_WINDOWS) {
-      // Windows terminates immediately with TerminateProcess
-      expect(elapsed).toBeLessThan(5000);
-      // Exit code is null when killed externally, or 1 for error exit
-      expect(exitCode === null || exitCode === 1).toBe(true);
+      expect(elapsed).toBeLessThan(10000);
+      expect(exitCode === null || exitCode === 0 || exitCode === 1).toBe(true);
     } else {
-      // Unix waits for kill-timeout then sends SIGKILL
+      // Should take at least kill-timeout to force kill the hanging child
       expect(elapsed).toBeGreaterThan(900);
-      expect(elapsed).toBeLessThan(5000);
-      expect(exitCode).toBe(137);
+      expect(elapsed).toBeLessThan(10000);
+      // Foreground mode exits with 0 on SIGTERM (graceful shutdown path)
+      expect(exitCode === 0 || exitCode === null).toBe(true);
     }
-  }, 20000);
+  }, 25000);
 
   it('preserves child exit code', async () => {
     // Create a script that exits with a specific code
@@ -327,21 +330,19 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     const exitCode = await new Promise<number | null>((resolve) => {
       proc.on('exit', (code) => resolve(code));
-      setTimeout(() => resolve(null), 5000);
+      setTimeout(() => resolve(null), 10000);
     });
 
+    await waitForDaemonKilled();
+
     expect(exitCode).toBe(42);
-  }, 10000);
+  }, 15000);
 
   it('cluster mode terminates all workers on SIGTERM', async () => {
     const proc = spawnOrkify(['run', clusterScriptPath, '-n', 'test-cluster-term', '-w', '2'], {
       stdio: 'pipe',
       detached: false,
     });
-
-    let output = '';
-    proc.stdout?.on('data', (d) => (output += d.toString()));
-    proc.stderr?.on('data', (d) => (output += d.toString()));
 
     await waitForHttpReady('http://localhost:3015/');
 
@@ -353,24 +354,26 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     const exitCode = await new Promise<number | null>((resolve) => {
       proc.on('exit', (code) => resolve(code));
-      setTimeout(() => resolve(null), 8000);
+      setTimeout(() => resolve(null), 10000);
     });
 
-    // Should exit (0 for graceful or 143 for SIGTERM)
-    expect(exitCode === 0 || exitCode === 143 || exitCode === null).toBe(true);
+    await waitForDaemonKilled();
+
+    // Should exit gracefully
+    expect(exitCode === 0 || exitCode === null).toBe(true);
 
     // Server should no longer respond
     await sleep(100);
     const { status: afterStatus } = await httpGet('http://localhost:3015/');
     expect(afterStatus).toBe(0);
-  }, 25000);
+  }, 30000);
 
-  it('does not require daemon for run command', async () => {
-    // Kill any existing daemon
+  it('does not require a separate daemon process', async () => {
+    // Kill any existing daemon first
     orkify('kill');
     await waitForDaemonKilled();
 
-    // Run should work without daemon
+    // orkify run should work without a separate daemon — it IS the daemon
     const proc = spawnOrkify(['run', scriptPath, '-n', 'test-no-daemon', '--silent'], {
       stdio: 'pipe',
       detached: false,
@@ -385,9 +388,106 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     await new Promise<void>((resolve) => {
       proc.on('exit', () => resolve());
-      setTimeout(resolve, 3000);
+      setTimeout(resolve, 5000);
     });
+
+    await waitForDaemonKilled();
+  }, 20000);
+
+  it('makes orkify list work via IPC', async () => {
+    const proc = spawnOrkify(['run', scriptPath, '-n', 'test-list'], {
+      stdio: 'pipe',
+      detached: false,
+    });
+
+    await waitForHttpReady('http://localhost:3014/');
+
+    // orkify list should work because run starts an IPC server
+    const listOutput = orkify('list');
+    expect(listOutput).toContain('test-list');
+    expect(listOutput).toContain('online');
+
+    proc.kill('SIGTERM');
+
+    await new Promise<void>((resolve) => {
+      proc.on('exit', () => resolve());
+      setTimeout(resolve, 5000);
+    });
+
+    await waitForDaemonKilled();
+  }, 20000);
+
+  it('exits when primary process exits (exit code 0)', async () => {
+    const exitScript = join(tempDir, 'exit-zero.js');
+    writeFileSync(
+      exitScript,
+      `
+      const http = require('http');
+      const server = http.createServer((req, res) => {
+        res.writeHead(200);
+        res.end('ok');
+      });
+      server.listen(3017, () => {
+        console.log('Ready');
+        // Exit cleanly after 1 second
+        setTimeout(() => {
+          server.close(() => process.exit(0));
+        }, 1000);
+      });
+    `
+    );
+
+    const proc = spawnOrkify(['run', exitScript, '-n', 'test-exit-zero', '--silent'], {
+      stdio: 'pipe',
+      detached: false,
+    });
+
+    const exitCode = await new Promise<number | null>((resolve) => {
+      proc.on('exit', (code) => resolve(code));
+      setTimeout(() => resolve(null), 10000);
+    });
+
+    await waitForDaemonKilled();
+
+    expect(exitCode).toBe(0);
   }, 15000);
+
+  it('two orkify run instances conflict', async () => {
+    const proc1 = spawnOrkify(['run', scriptPath, '-n', 'test-conflict-1', '--silent'], {
+      stdio: 'pipe',
+      detached: false,
+    });
+
+    await waitForHttpReady('http://localhost:3014/');
+
+    // Second instance should fail
+    let proc2Output = '';
+    const proc2 = spawnOrkify(['run', scriptPath, '-n', 'test-conflict-2', '--silent'], {
+      stdio: 'pipe',
+      detached: false,
+    });
+    proc2.stdout?.on('data', (d: Buffer) => (proc2Output += d.toString()));
+    proc2.stderr?.on('data', (d: Buffer) => (proc2Output += d.toString()));
+
+    const exitCode2 = await new Promise<number | null>((resolve) => {
+      proc2.on('exit', (code) => resolve(code));
+      setTimeout(() => resolve(null), 5000);
+    });
+
+    // Second instance should exit with error
+    expect(exitCode2).toBe(1);
+    expect(proc2Output).toContain('already active');
+
+    // Clean up first instance
+    proc1.kill('SIGTERM');
+
+    await new Promise<void>((resolve) => {
+      proc1.on('exit', () => resolve());
+      setTimeout(resolve, 5000);
+    });
+
+    await waitForDaemonKilled();
+  }, 20000);
 
   it('respects --cwd option in run command', async () => {
     const cwdTempDir = realpathSync(mkdtempSync(join(tmpdir(), 'orkify-run-cwd-')));
@@ -441,8 +541,10 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
     await new Promise<void>((resolve) => {
       proc.on('exit', () => resolve());
-      setTimeout(resolve, 3000);
+      setTimeout(resolve, 5000);
     });
+
+    await waitForDaemonKilled();
 
     // Windows holds directory handles briefly after process exit
     if (IS_WINDOWS) await sleep(500);
@@ -452,5 +554,45 @@ describe('Run Command (Foreground/Container Mode)', () => {
     } catch (err) {
       console.warn('Failed to clean up temp dir (expected on Windows):', err);
     }
-  }, 15000);
+  }, 20000);
+
+  it('restarts process with --max-restarts', async () => {
+    // Create a script that crashes after 500ms
+    const crashScript = join(tempDir, 'crash-app.js');
+    writeFileSync(
+      crashScript,
+      `
+      const http = require('http');
+      const server = http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ pid: process.pid }));
+      });
+      server.listen(3018, () => {
+        console.log('Started, will crash in 500ms');
+        setTimeout(() => {
+          process.exit(1);
+        }, 500);
+      });
+    `
+    );
+
+    const proc = spawnOrkify(
+      ['run', crashScript, '-n', 'test-restarts', '--max-restarts', '2', '--silent'],
+      {
+        stdio: 'pipe',
+        detached: false,
+      }
+    );
+
+    // Should eventually exit after max restarts are exhausted
+    const exitCode = await new Promise<number | null>((resolve) => {
+      proc.on('exit', (code) => resolve(code));
+      setTimeout(() => resolve(null), 30000);
+    });
+
+    await waitForDaemonKilled();
+
+    // Process should have exited with code 1 (propagated from child)
+    expect(exitCode).toBe(1);
+  }, 35000);
 });

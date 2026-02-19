@@ -246,6 +246,7 @@ export class ManagedProcess extends EventEmitter {
         // Clean exit (code 0, no signal) is not a crash — don't restart or count
         if (code === 0 && !signal) {
           this.forkProcess = null;
+          this.emit('process:finished', { code, signal });
           return;
         }
 
@@ -272,6 +273,7 @@ export class ManagedProcess extends EventEmitter {
           console.error(`[${this.config.name}] Max restarts exceeded`);
           this.forkProcess = null;
           this.emit('worker:maxRestarts', 0);
+          this.emit('process:finished', { code, signal });
         }
       } else {
         // Process exited during shutdown
@@ -505,6 +507,7 @@ export class ManagedProcess extends EventEmitter {
           console.error(`[${this.config.name}] Cluster primary max restarts exceeded`);
           this.clusterPrimary = null;
           this.emit('worker:maxRestarts', -1);
+          this.emit('process:finished', { code, signal });
         }
       }
     });
