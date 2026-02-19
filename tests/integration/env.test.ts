@@ -6,6 +6,7 @@ import { spawnOrkify } from './setup.js';
 import {
   httpGet,
   orkify,
+  waitForDaemonKilled,
   waitForHttpReady,
   waitForProcessOnline,
   waitForProcessRemoved,
@@ -158,6 +159,10 @@ API_KEY=secret-key-123`
   it('loads env file via --node-args in foreground mode (run command)', async () => {
     orkify(`delete ${appName}`);
     await waitForProcessRemoved(appName);
+
+    // Kill the background daemon so orkify run can acquire the PID lock
+    orkify('kill');
+    await waitForDaemonKilled();
 
     const proc = spawnOrkify(
       [

@@ -11,7 +11,11 @@ describe('Run Command (Foreground/Container Mode)', () => {
   let clusterScriptPath: string;
   let hangingScriptPath: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    // Kill any background daemon left running by previous test files
+    orkify('kill');
+    await waitForDaemonKilled();
+
     tempDir = realpathSync(mkdtempSync(join(tmpdir(), 'orkify-run-test-')));
     scriptPath = join(tempDir, 'app.js');
     clusterScriptPath = join(tempDir, 'cluster-app.js');
