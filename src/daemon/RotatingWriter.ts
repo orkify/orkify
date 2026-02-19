@@ -2,6 +2,7 @@ import {
   closeSync,
   createReadStream,
   createWriteStream,
+  existsSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -119,13 +120,18 @@ export class RotatingWriter {
   }
 
   private async compressAndPrune(uncompressedPath: string): Promise<void> {
-    const gzPath = `${uncompressedPath}.gz`;
-    try {
-      await pipeline(createReadStream(uncompressedPath), createGzip(), createWriteStream(gzPath));
-      unlinkSync(uncompressedPath);
-    } catch (err) {
-      console.error(`Log compression error (${uncompressedPath}):`, (err as Error).message);
-      // Leave uncompressed file — bare files are cleaned up on next prune cycle
+    // Skip if already compressed by a previous call's prune step.
+    // Without this guard, createWriteStream truncates the valid .gz to 0 bytes
+    // before createReadStream fails with ENOENT, corrupting the archive.
+    if (existsSync(uncompressedPath)) {
+      const gzPath = `${uncompressedPath}.gz`;
+      try {
+        await pipeline(createReadStream(uncompressedPath), createGzip(), createWriteStream(gzPath));
+        unlinkSync(uncompressedPath);
+      } catch (err) {
+        console.error(`Log compression error (${uncompressedPath}):`, (err as Error).message);
+        // Leave uncompressed file — bare files are cleaned up on next prune cycle
+      }
     }
 
     // Prune old archives and bare files left by failed compressions
@@ -139,6 +145,7 @@ export class RotatingWriter {
       const bareFiles = files.filter((f) => f.startsWith(`${base}-`) && !f.endsWith('.gz'));
       for (const bare of bareFiles) {
         const barePath = join(dir, bare);
+        if (!existsSync(barePath)) continue;
         const bareGzPath = `${barePath}.gz`;
         try {
           await pipeline(createReadStream(barePath), createGzip(), createWriteStream(bareGzPath));
