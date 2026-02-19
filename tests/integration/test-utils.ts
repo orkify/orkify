@@ -266,39 +266,50 @@ export async function waitForProcessRemoved(name: string, maxWait = 10000): Prom
  */
 export async function waitForDaemonKilled(maxWait = 5000): Promise<void> {
   const start = Date.now();
-  const pidFile = join(homedir(), '.orkify', 'daemon.pid');
 
   if (process.platform === 'win32') {
-    // On Windows, check if the Named Pipe AND PID file are both gone.
-    // The pipe disappears when the IPC server stops, but the PID file is
-    // cleaned up slightly later — orkify run needs BOTH gone to start.
+    // On Windows, check if the Named Pipe still exists
     const username = userInfo().username;
     const pipeName = `orkify-${username}`;
     while (Date.now() - start < maxWait) {
-      const pipeGone = (() => {
-        try {
-          return !readdirSync('\\\\.\\pipe').includes(pipeName);
-        } catch {
-          return true;
+      try {
+        const pipes = readdirSync('\\\\.\\pipe');
+        if (!pipes.includes(pipeName)) {
+          return;
         }
-      })();
-      if (pipeGone && !existsSync(pidFile)) {
+      } catch {
+        // Pipe directory not readable, assume daemon is gone
         return;
       }
       await sleep(50);
     }
-    throw new Error(`Daemon pipe or PID file still exists after ${maxWait}ms`);
+    throw new Error(`Daemon pipe still exists after ${maxWait}ms`);
   } else {
-    // On Unix, check if the socket file AND PID file are both gone
+    // On Unix, check if the socket file still exists
     const socketPath = join(homedir(), '.orkify', 'orkify.sock');
     while (Date.now() - start < maxWait) {
-      if (!existsSync(socketPath) && !existsSync(pidFile)) {
+      if (!existsSync(socketPath)) {
         return;
       }
       await sleep(50);
     }
-    throw new Error(`Daemon socket or PID file still exists after ${maxWait}ms`);
+    throw new Error(`Daemon socket still exists after ${maxWait}ms`);
   }
+}
+
+/**
+ * Wait until the daemon PID file is removed.
+ * orkify run needs the PID file gone (not just the socket) to acquire the lock.
+ * The PID file is cleaned up after the socket, so this is a stricter check.
+ */
+export async function waitForPidFileRemoved(maxWait = 5000): Promise<void> {
+  const pidFile = join(homedir(), '.orkify', 'daemon.pid');
+  const start = Date.now();
+  while (Date.now() - start < maxWait) {
+    if (!existsSync(pidFile)) return;
+    await sleep(50);
+  }
+  throw new Error(`Daemon PID file still exists after ${maxWait}ms`);
 }
 
 /**

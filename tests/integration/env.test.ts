@@ -8,6 +8,7 @@ import {
   orkify,
   waitForDaemonKilled,
   waitForHttpReady,
+  waitForPidFileRemoved,
   waitForProcessOnline,
   waitForProcessRemoved,
   waitForWorkersOnline,
@@ -160,9 +161,12 @@ API_KEY=secret-key-123`
     orkify(`delete ${appName}`);
     await waitForProcessRemoved(appName);
 
-    // Kill the background daemon so orkify run can acquire the PID lock
+    // Kill the background daemon so orkify run can acquire the PID lock.
+    // Wait for both socket/pipe AND PID file — orkify run needs the PID file
+    // gone to acquire the lock, and that's cleaned up after the socket.
     orkify('kill');
     await waitForDaemonKilled(10000);
+    await waitForPidFileRemoved(5000);
 
     const proc = spawnOrkify(
       [
