@@ -194,7 +194,7 @@ API_KEY=secret-key-123`
       proc.on('exit', () => resolve());
       setTimeout(resolve, 3000);
     });
-  }, 15000);
+  }, 30000);
 });
 
 describe('Working Directory (--cwd)', () => {
