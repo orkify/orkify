@@ -6,7 +6,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -77,51 +76,40 @@ describe('Log Rotation', () => {
     }
 
     // Wait for rotation and compression to complete.
-    // Poll for .gz archives with non-zero size — gzip can be slow on CI.
+    // RotatingWriter.compressAndPrune() deletes the uncompressed file after the
+    // gzip pipeline finishes, so we poll until we see a .gz archive AND no bare
+    // (uncompressed) rotated files remain — that guarantees compression is done.
     const currentLog = join(logsDir, `${appName}.stdout.log`);
+    const base = `${appName}.stdout.log`;
     let gzArchives: string[] = [];
     const rotationDeadline = Date.now() + 15000;
     while (Date.now() < rotationDeadline) {
       await sleep(200);
       if (!existsSync(logsDir)) continue;
       const files = readdirSync(logsDir);
-      gzArchives = files.filter((f) => {
-        if (!f.startsWith(`${appName}.stdout.log-`) || !f.endsWith('.gz')) return false;
-        try {
-          return statSync(join(logsDir, f)).size > 0;
-        } catch {
-          return false;
-        }
-      });
-      if (gzArchives.length > 0) break;
+      gzArchives = files.filter((f) => f.startsWith(`${base}-`) && f.endsWith('.gz'));
+      const bareFiles = files.filter((f) => f.startsWith(`${base}-`) && !f.endsWith('.gz'));
+      // At least one archive exists and no uncompressed rotated files remain
+      if (gzArchives.length > 0 && bareFiles.length === 0) break;
     }
 
     expect(existsSync(currentLog)).toBe(true);
     expect(gzArchives.length).toBeGreaterThan(0);
 
-    // Verify the .gz file is valid gzip (retry if compression not yet flushed)
+    // Compression is complete — decompress and verify content
     const firstArchive = join(logsDir, gzArchives[0]);
-    let content = '';
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        const chunks: Buffer[] = [];
-        await pipeline(
-          createReadStream(firstArchive),
-          createGunzip(),
-          new Writable({
-            write(chunk, _enc, cb) {
-              chunks.push(chunk);
-              cb();
-            },
-          })
-        );
-        content = Buffer.concat(chunks).toString();
-        if (content.length > 0) break;
-      } catch {
-        // gzip file may still be written — wait and retry
-      }
-      await sleep(500);
-    }
+    const chunks: Buffer[] = [];
+    await pipeline(
+      createReadStream(firstArchive),
+      createGunzip(),
+      new Writable({
+        write(chunk, _enc, cb) {
+          chunks.push(chunk);
+          cb();
+        },
+      })
+    );
+    const content = Buffer.concat(chunks).toString();
     expect(content.length).toBeGreaterThan(0);
 
     // Current file should be smaller than max size (freshly rotated)
