@@ -6,6 +6,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -76,28 +77,32 @@ describe('Log Rotation', () => {
     }
 
     // Wait for rotation and compression to complete.
-    // Poll for .gz archives instead of fixed sleep — gzip can be slow on CI.
+    // Poll for .gz archives with non-zero size — gzip can be slow on CI.
     const currentLog = join(logsDir, `${appName}.stdout.log`);
     let gzArchives: string[] = [];
-    const rotationDeadline = Date.now() + 10000;
+    const rotationDeadline = Date.now() + 15000;
     while (Date.now() < rotationDeadline) {
       await sleep(200);
       if (!existsSync(logsDir)) continue;
       const files = readdirSync(logsDir);
-      gzArchives = files.filter((f) => f.startsWith(`${appName}.stdout.log-`) && f.endsWith('.gz'));
+      gzArchives = files.filter((f) => {
+        if (!f.startsWith(`${appName}.stdout.log-`) || !f.endsWith('.gz')) return false;
+        try {
+          return statSync(join(logsDir, f)).size > 0;
+        } catch {
+          return false;
+        }
+      });
       if (gzArchives.length > 0) break;
     }
 
     expect(existsSync(currentLog)).toBe(true);
     expect(gzArchives.length).toBeGreaterThan(0);
 
-    // Wait briefly for gzip to finish writing the file
-    await sleep(500);
-
-    // Verify the .gz file is valid gzip (retry once if still being written)
+    // Verify the .gz file is valid gzip (retry if compression not yet flushed)
     const firstArchive = join(logsDir, gzArchives[0]);
     let content = '';
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
         const chunks: Buffer[] = [];
         await pipeline(
@@ -111,11 +116,11 @@ describe('Log Rotation', () => {
           })
         );
         content = Buffer.concat(chunks).toString();
-        break;
+        if (content.length > 0) break;
       } catch {
         // gzip file may still be written — wait and retry
-        await sleep(500);
       }
+      await sleep(500);
     }
     expect(content.length).toBeGreaterThan(0);
 
