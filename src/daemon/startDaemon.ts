@@ -550,14 +550,14 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
       await telemetry?.shutdown();
       await orchestrator.shutdown();
       if (!skipServerStop) {
+        // Remove PID file before closing the IPC server. The socket
+        // disappearing is the signal tests (and CLI) use to detect
+        // the daemon is gone, so the PID file must be gone first.
+        cleanup();
         await server.stop();
       }
     } catch (err) {
       console.error('Error during graceful shutdown:', (err as Error).message);
-    }
-
-    if (!skipServerStop) {
-      cleanup();
     }
   }
 

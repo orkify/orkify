@@ -3,14 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { IS_WINDOWS, spawnOrkify } from './setup.js';
-import {
-  httpGet,
-  orkify,
-  sleep,
-  waitForDaemonKilled,
-  waitForHttpReady,
-  waitForPidFileRemoved,
-} from './test-utils.js';
+import { httpGet, orkify, sleep, waitForDaemonKilled, waitForHttpReady } from './test-utils.js';
 
 describe('Run Command (Foreground/Container Mode)', () => {
   let tempDir: string;
@@ -20,10 +13,8 @@ describe('Run Command (Foreground/Container Mode)', () => {
 
   beforeAll(async () => {
     // Kill any background daemon left running by previous test files.
-    // Wait for PID file too — orkify run needs it gone to acquire the lock.
     orkify('kill');
     await waitForDaemonKilled();
-    await waitForPidFileRemoved();
 
     tempDir = realpathSync(mkdtempSync(join(tmpdir(), 'orkify-run-test-')));
     scriptPath = join(tempDir, 'app.js');

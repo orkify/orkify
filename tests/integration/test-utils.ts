@@ -298,21 +298,6 @@ export async function waitForDaemonKilled(maxWait = 5000): Promise<void> {
 }
 
 /**
- * Wait until the daemon PID file is removed.
- * orkify run needs the PID file gone (not just the socket) to acquire the lock.
- * The PID file is cleaned up after the socket, so this is a stricter check.
- */
-export async function waitForPidFileRemoved(maxWait = 5000): Promise<void> {
-  const pidFile = join(homedir(), '.orkify', 'daemon.pid');
-  const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    if (!existsSync(pidFile)) return;
-    await sleep(50);
-  }
-  throw new Error(`Daemon PID file still exists after ${maxWait}ms`);
-}
-
-/**
  * Wait until a specific process is no longer alive.
  * Uses `kill -0` to check without sending a signal.
  */
