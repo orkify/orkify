@@ -39,6 +39,7 @@ function crashRecovery(): void {
       env,
       configs,
       mcpOptions: mcpOptions ?? undefined,
+      daemonPid: process.pid,
     });
     const recoveryScript = join(__dirname, '..', 'cli', 'crash-recovery.js');
 

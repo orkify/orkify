@@ -3,18 +3,41 @@ import { IPCMessageType } from '../constants.js';
 import { DaemonClient } from '../ipc/DaemonClient.js';
 import { restoreDaemon } from '../ipc/restoreDaemon.js';
 
+/**
+ * Wait for a process to exit by polling kill(pid, 0).
+ */
+async function waitForPidDead(pid: number, maxWait: number): Promise<void> {
+  const deadline = Date.now() + maxWait;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return; // Process is dead
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 async function main() {
   const raw = process.env.ORKIFY_CRASH_RECOVERY;
   if (!raw) process.exit(0);
 
-  const { env, configs, mcpOptions } = JSON.parse(raw) as {
+  const { env, configs, mcpOptions, daemonPid } = JSON.parse(raw) as {
     env: Record<string, string>;
     configs: ProcessConfig[];
     mcpOptions?: McpStartPayload;
+    daemonPid?: number;
   };
 
   if (env.ORKIFY_API_KEY) process.env.ORKIFY_API_KEY = env.ORKIFY_API_KEY;
   if (env.ORKIFY_API_HOST) process.env.ORKIFY_API_HOST = env.ORKIFY_API_HOST;
+
+  // Wait for the old daemon process to fully exit before starting a new one.
+  // The PID file is already removed by cleanup(), but on Windows the named pipe
+  // stays open until the process exits — causing the new daemon to fail to bind.
+  if (daemonPid) {
+    await waitForPidDead(daemonPid, 10_000);
+  }
 
   const client = new DaemonClient();
   try {
