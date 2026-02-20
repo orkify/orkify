@@ -2,7 +2,13 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { httpGet, orkify, sleep, waitForProcessOnline } from './test-utils.js';
+import {
+  httpGet,
+  orkify,
+  sleep,
+  waitForProcessErrored,
+  waitForProcessOnline,
+} from './test-utils.js';
 
 describe('Error Handling', () => {
   it('fails gracefully for non-existent script', () => {
@@ -49,8 +55,8 @@ describe('Error Handling', () => {
     // Start the script (will crash due to syntax error)
     orkify(`up ${badScript} -n test-syntax-error`);
 
-    // Give it time to fail
-    await sleep(2000);
+    // Wait for it to crash
+    await waitForProcessErrored('test-syntax-error');
 
     // Process should have started but then crashed
     const list = orkify('list');

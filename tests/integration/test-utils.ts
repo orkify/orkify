@@ -246,6 +246,24 @@ export async function waitForProcessStopped(name: string, maxWait = 10000): Prom
 }
 
 /**
+ * Wait until a process shows as "errored" in orkify list.
+ */
+export async function waitForProcessErrored(name: string, maxWait = 10000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < maxWait) {
+    const list = orkify('list');
+    const lines = list.split('\n');
+    for (const line of lines) {
+      if (line.includes(name) && line.includes('errored')) {
+        return;
+      }
+    }
+    await sleep(100);
+  }
+  throw new Error(`Process "${name}" not errored after ${maxWait}ms`);
+}
+
+/**
  * Wait until a process is removed from orkify list.
  */
 export async function waitForProcessRemoved(name: string, maxWait = 10000): Promise<void> {

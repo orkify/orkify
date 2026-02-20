@@ -12,11 +12,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Step 1: Lint & unit tests on Linux (fastest, cheapest)
-  lint:
-    name: Lint & Unit Tests
+  # Step 1: Lint, unit tests, and E2E on Linux (single runner, single npm ci)
+  linux:
+    name: Lint, Unit & E2E (Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -35,24 +35,6 @@ jobs:
       - name: Run checks (typecheck, lint, format, unit tests)
         run: npm run check
 
-  # Step 2: E2E on Linux (1x cost)
-  e2e-linux:
-    name: E2E (Linux)
-    runs-on: ubuntu-latest
-    needs: lint
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
       - name: Build
         run: npm run build
 
@@ -65,11 +47,11 @@ jobs:
       - name: Run E2E tests
         run: npm run test:e2e
 
-  # Step 3: E2E on Windows (2x cost)
+  # Step 2: E2E on Windows and macOS (run in parallel after Linux passes)
   e2e-windows:
     name: E2E (Windows)
     runs-on: windows-latest
-    needs: e2e-linux
+    needs: linux
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -94,7 +76,6 @@ jobs:
       - name: Run E2E tests
         run: npm run test:e2e
 
-  # Step 4: E2E on macOS (10x cost)
   e2e-macos:
     name: E2E (macOS)
     runs-on: macos-latest

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { ORKIFY_CONFIG_FILE } from '../../src/constants.js';
 import { createTarball } from '../../src/deploy/tarball.js';
-import { httpGet, orkify, sleep, waitForHttpReady, waitForProcessOnline } from './test-utils.js';
+import { httpGet, orkify, waitForHttpReady, waitForProcessOnline } from './test-utils.js';
 
 const PORT = '4200';
 const APP_NAME = 'deploy-test';
@@ -98,7 +98,6 @@ describe('Deploy Local E2E', () => {
     expect(output).toContain('Deploy complete');
 
     // Wait for the new version to come up
-    await sleep(2000);
     await waitForHttpReady(`http://localhost:${PORT}/version`);
 
     // Verify v2 is running
@@ -116,7 +115,6 @@ describe('Deploy Local E2E', () => {
     const output = orkify(`deploy local "${tarPath}"`, 60000);
     expect(output).toContain('Deploy complete');
 
-    await sleep(2000);
     await waitForHttpReady(`http://localhost:${PORT}/version`);
 
     const { status, body } = await httpGet(`http://localhost:${PORT}/version`);
