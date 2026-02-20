@@ -1,13 +1,16 @@
 import {
   closeSync,
+  createReadStream,
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   unlinkSync,
   writeSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import type {
   DeployCommand,
   DeployLocalPayload,
@@ -25,6 +28,7 @@ import type {
 import {
   DAEMON_PID_FILE,
   IPCMessageType,
+  LOGS_DIR,
   ORKIFY_DEPLOYS_DIR,
   ORKIFY_HOME,
   SOCKET_PATH,
@@ -103,6 +107,61 @@ function acquirePidLock(): number {
 
     throw new Error(`Another daemon is already running (PID ${holderPid})`);
   }
+}
+
+/**
+ * Read the last N lines from a log file on disk.
+ */
+function tailFile(filePath: string, lines: number): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const buffer: string[] = [];
+    const stream = createReadStream(filePath, { encoding: 'utf8' });
+    const rl = createInterface({ input: stream });
+
+    rl.on('line', (line) => {
+      buffer.push(line);
+      if (buffer.length > lines) {
+        buffer.shift();
+      }
+    });
+
+    rl.on('close', () => resolve(buffer));
+    rl.on('error', reject);
+  });
+}
+
+/**
+ * Read recent log lines from disk for a process (or all processes).
+ */
+async function readLogFiles(
+  target: string,
+  lines: number
+): Promise<Array<{ file: string; lines: string[] }>> {
+  if (!existsSync(LOGS_DIR)) return [];
+
+  const files: string[] = [];
+
+  if (target !== 'all') {
+    const outFile = join(LOGS_DIR, `${target}.stdout.log`);
+    const errFile = join(LOGS_DIR, `${target}.stderr.log`);
+    if (existsSync(outFile)) files.push(outFile);
+    if (existsSync(errFile)) files.push(errFile);
+  } else {
+    for (const file of readdirSync(LOGS_DIR)) {
+      if (file.endsWith('.stdout.log') || file.endsWith('.stderr.log')) {
+        files.push(join(LOGS_DIR, file));
+      }
+    }
+  }
+
+  const results: Array<{ file: string; lines: string[] }> = [];
+  for (const file of files) {
+    const tail = await tailFile(file, lines);
+    if (tail.length > 0) {
+      results.push({ file, lines: tail });
+    }
+  }
+  return results;
 }
 
 export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonContext> {
@@ -213,9 +272,13 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
 
     if (payload.follow) {
       server.subscribeToLogs(target, client, request.id);
+      return createResponse(request.id, true, { subscribed: true });
     }
 
-    return createResponse(request.id, true, { subscribed: payload.follow });
+    // Non-follow mode: read recent lines from log files on disk
+    const lines = payload.lines ?? 100;
+    const logs = await readLogFiles(target, lines);
+    return createResponse(request.id, true, { subscribed: false, logs });
   });
 
   server.registerHandler(IPCMessageType.SNAP, async (request) => {

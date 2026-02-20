@@ -65,6 +65,8 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [healthy, setHealthy] = useState<boolean | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
+  const [fakeLogs, setFakeLogs] = useState(true);
+  const [customMsg, setCustomMsg] = useState('');
   const nextId = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -92,6 +94,15 @@ export default function Dashboard() {
       } catch {
         if (active) setHealthy(false);
       }
+      try {
+        const res = await fetch('/api/logs');
+        if (active && res.ok) {
+          const data = await res.json();
+          setFakeLogs(data.fakeLogs);
+        }
+      } catch {
+        // ignore
+      }
       if (active) setTimeout(poll, 2000);
     }
     poll();
@@ -99,6 +110,38 @@ export default function Dashboard() {
       active = false;
     };
   }, []);
+
+  async function toggleFakeLogs(enabled: boolean) {
+    try {
+      const res = await fetch('/api/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle', enabled }),
+      });
+      const data = await res.json();
+      setFakeLogs(data.fakeLogs);
+      addLog(`Fake logs ${data.fakeLogs ? 'enabled' : 'disabled'} on worker ${data.worker}`, true);
+    } catch (err) {
+      addLog(`Toggle failed: ${err instanceof Error ? err.message : 'unknown'}`, false);
+    }
+  }
+
+  async function sendCustomLog() {
+    const msg = customMsg.trim();
+    if (!msg) return;
+    try {
+      const res = await fetch('/api/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'log', message: msg }),
+      });
+      const data = await res.json();
+      setCustomMsg('');
+      addLog(`Logged "${data.message}" on worker ${data.worker}`, true);
+    } catch (err) {
+      addLog(`Log failed: ${err instanceof Error ? err.message : 'unknown'}`, false);
+    }
+  }
 
   async function triggerChaos(action: string, type?: string, message?: string, delay?: number) {
     try {
@@ -212,6 +255,46 @@ export default function Dashboard() {
               <div className="text-xs text-zinc-500">{et.desc}</div>
             </button>
           ))}
+        </div>
+      </section>
+
+      {/* Log Controls */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4">
+          Log Controls
+        </h2>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <label className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-800 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={fakeLogs}
+              onChange={(e) => toggleFakeLogs(e.target.checked)}
+              className="accent-emerald-500"
+            />
+            <span className="text-sm text-zinc-300">Fake logs</span>
+          </label>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              sendCustomLog();
+            }}
+            className="flex flex-1 gap-2"
+          >
+            <input
+              type="text"
+              value={customMsg}
+              onChange={(e) => setCustomMsg(e.target.value)}
+              placeholder="Custom log message…"
+              className="flex-1 px-3 py-2 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-600"
+            />
+            <button
+              type="submit"
+              disabled={!customMsg.trim()}
+              className="px-4 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-sm font-medium text-zinc-300 hover:bg-zinc-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Send
+            </button>
+          </form>
         </div>
       </section>
 

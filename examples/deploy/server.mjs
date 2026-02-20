@@ -38,6 +38,7 @@ globalThis.__app = {
   buildInfo,
   workerId: WORKER_ID,
   processName: PROCESS_NAME,
+  fakeLogs: true,
 };
 
 // ---------------------------------------------------------------------------
@@ -82,12 +83,14 @@ const LOG_GENERATORS = [
 function scheduleLog() {
   const delay = 1500 + Math.random() * 3000;
   setTimeout(() => {
-    const gen = LOG_GENERATORS[Math.floor(Math.random() * LOG_GENERATORS.length)];
-    const msg = gen();
-    if (Math.random() < 0.1) {
-      console.warn(`[w${WORKER_ID}] WARN: ${msg}`);
-    } else {
-      console.log(`[w${WORKER_ID}] ${msg}`);
+    if (globalThis.__app.fakeLogs) {
+      const gen = LOG_GENERATORS[Math.floor(Math.random() * LOG_GENERATORS.length)];
+      const msg = gen();
+      if (Math.random() < 0.1) {
+        console.warn(`[w${WORKER_ID}] WARN: ${msg}`);
+      } else {
+        console.log(`[w${WORKER_ID}] ${msg}`);
+      }
     }
     scheduleLog();
   }, delay);

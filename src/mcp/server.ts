@@ -326,7 +326,12 @@ export function createMcpServer(options?: { authInfo?: AuthInfo }): McpServer {
         };
         const response = await mcpDaemonClient.request(IPCMessageType.LOGS, payload);
         if (response.success) {
-          return formatSuccess(response.data);
+          const data = response.data as { logs?: Array<{ file: string; lines: string[] }> };
+          if (data.logs && data.logs.length > 0) {
+            const output = data.logs.map((f) => f.lines.join('\n')).join('\n');
+            return formatSuccess(output);
+          }
+          return formatSuccess({ message: 'No logs found' });
         }
         return formatError(response.error || 'Failed to get logs', 'LOGS_FAILED', {
           target: params.target,
