@@ -5,9 +5,12 @@ import { daemonClient } from '../../ipc/DaemonClient.js';
 
 export const killCommand = new Command('kill')
   .description('Kill the ORKIFY daemon')
-  .action(async () => {
+  .option('-f, --force', 'Skip graceful shutdown and SIGKILL all processes immediately')
+  .action(async (opts: { force?: boolean }) => {
     try {
-      const response = await daemonClient.request(IPCMessageType.KILL_DAEMON);
+      const response = await daemonClient.request(IPCMessageType.KILL_DAEMON, {
+        force: opts.force === true,
+      });
 
       if (response.success) {
         console.log(chalk.yellow('⏹ ORKIFY daemon killed'));

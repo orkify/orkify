@@ -713,6 +713,36 @@ export class ManagedProcess extends EventEmitter {
     await Promise.all([this.outWriter?.flush(), this.errWriter?.flush()]);
   }
 
+  /**
+   * Immediately SIGKILL all child processes without waiting for graceful shutdown.
+   */
+  forceKill(): void {
+    this.isShuttingDown = true;
+    this.clearForkLaunchTimer();
+    this.clearAllLaunchTimers();
+
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval);
+      this.statsInterval = null;
+    }
+
+    if (this.config.execMode === ExecMode.FORK) {
+      if (this.forkProcess) {
+        this.forkProcess.kill('SIGKILL');
+        this.forkProcess = null;
+      }
+    } else {
+      if (this.clusterPrimary) {
+        this.clusterPrimary.kill('SIGKILL');
+        this.clusterPrimary = null;
+        this.clusterWorkers.clear();
+      }
+    }
+
+    this.outWriter?.end();
+    this.errWriter?.end();
+  }
+
   private async stopFork(): Promise<void> {
     const child = this.forkProcess;
     if (!child) return;

@@ -77,31 +77,31 @@ orkify run app.js -w 4
 
 ## Commands
 
-| Command                          | Description                                      |
-| -------------------------------- | ------------------------------------------------ |
-| `orkify up <script>`             | Start a process (daemon mode)                    |
-| `orkify down <name\|id\|all>`    | Stop process(es)                                 |
-| `orkify run <script>`            | Run in foreground (for containers)               |
-| `orkify restart <name\|id\|all>` | Hard restart (stop + start)                      |
-| `orkify reload <name\|id\|all>`  | Zero-downtime rolling reload                     |
-| `orkify list`                    | List all processes with status                   |
-| `orkify list -v`                 | Verbose list (includes PIDs)                     |
-| `orkify list --all-users`        | List processes from all users (requires sudo)    |
-| `orkify logs [name]`             | View logs (-f to follow, -n lines, --err/--out)  |
-| `orkify delete <name\|id\|all>`  | Stop and remove from process list                |
-| `orkify flush [name\|id\|all]`   | Truncate logs and remove rotated archives        |
-| `orkify snap [file] [--no-env]`  | Snapshot current process list                    |
-| `orkify restore [file]`          | Restore previously saved processes (--no-remote) |
-| `orkify kill`                    | Stop the daemon                                  |
-| `orkify daemon-reload`           | Reload daemon code (snap → kill → restore)       |
-| `orkify deploy pack [dir]`       | Create a deploy tarball                          |
-| `orkify deploy local <tarball>`  | Deploy from a local tarball                      |
-| `orkify deploy upload [dir]`     | Upload a build artifact for deployment           |
-| `orkify mcp`                     | Start MCP server for AI tools (stdio)            |
-| `orkify mcp --simple-http`       | Start MCP HTTP server (runs inside daemon)       |
-| `orkify mcp stop`                | Stop the MCP HTTP server                         |
-| `orkify mcp status`              | Show MCP HTTP server status                      |
-| `orkify mcp keygen`              | Generate a new MCP API key                       |
+| Command                          | Description                                       |
+| -------------------------------- | ------------------------------------------------- |
+| `orkify up <script>`             | Start a process (daemon mode)                     |
+| `orkify down <name\|id\|all>`    | Stop process(es)                                  |
+| `orkify run <script>`            | Run in foreground (for containers)                |
+| `orkify restart <name\|id\|all>` | Hard restart (stop + start)                       |
+| `orkify reload <name\|id\|all>`  | Zero-downtime rolling reload                      |
+| `orkify list`                    | List all processes with status                    |
+| `orkify list -v`                 | Verbose list (includes PIDs)                      |
+| `orkify list --all-users`        | List processes from all users (requires sudo)     |
+| `orkify logs [name]`             | View logs (-f to follow, -n lines, --err/--out)   |
+| `orkify delete <name\|id\|all>`  | Stop and remove from process list                 |
+| `orkify flush [name\|id\|all]`   | Truncate logs and remove rotated archives         |
+| `orkify snap [file] [--no-env]`  | Snapshot current process list                     |
+| `orkify restore [file]`          | Restore previously saved processes (--no-remote)  |
+| `orkify kill [--force]`          | Stop the daemon (--force skips graceful shutdown) |
+| `orkify daemon-reload`           | Reload daemon code (snap → kill → restore)        |
+| `orkify deploy pack [dir]`       | Create a deploy tarball                           |
+| `orkify deploy local <tarball>`  | Deploy from a local tarball                       |
+| `orkify deploy upload [dir]`     | Upload a build artifact for deployment            |
+| `orkify mcp`                     | Start MCP server for AI tools (stdio)             |
+| `orkify mcp --simple-http`       | Start MCP HTTP server (runs inside daemon)        |
+| `orkify mcp stop`                | Stop the MCP HTTP server                          |
+| `orkify mcp status`              | Show MCP HTTP server status                       |
+| `orkify mcp keygen`              | Generate a new MCP API key                        |
 
 ## Options for `up` and `run`
 

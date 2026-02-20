@@ -70,6 +70,7 @@ export interface IPCMessage {
 export interface IPCRequest extends IPCMessage {
   payload?:
     | DeployRestorePayload
+    | KillPayload
     | LogsPayload
     | McpStartPayload
     | ProcessConfig[]
@@ -107,6 +108,10 @@ export interface UpPayload {
   logMaxSize?: number;
   logMaxFiles?: number;
   logMaxAge?: number;
+}
+
+export interface KillPayload {
+  force?: boolean;
 }
 
 export interface TargetPayload {

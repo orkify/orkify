@@ -160,8 +160,8 @@ API_KEY=secret-key-123`
     orkify(`delete ${appName}`);
     await waitForProcessRemoved(appName);
 
-    // Kill the background daemon so orkify run can acquire the PID lock.
-    orkify('kill');
+    // Force-kill the background daemon so orkify run can acquire the PID lock.
+    orkify('kill --force');
     await waitForDaemonKilled(20000);
 
     const proc = spawnOrkify(

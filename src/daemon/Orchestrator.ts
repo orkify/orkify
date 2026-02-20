@@ -315,6 +315,17 @@ export class Orchestrator extends EventEmitter {
     this.nameToId.clear();
   }
 
+  /**
+   * Immediately SIGKILL all child processes without waiting for graceful shutdown.
+   */
+  forceShutdown(): void {
+    for (const container of this.processes.values()) {
+      container.forceKill();
+    }
+    this.processes.clear();
+    this.nameToId.clear();
+  }
+
   async reconcile(
     configs: ProcessConfig[],
     env?: Record<string, string>

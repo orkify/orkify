@@ -25,9 +25,7 @@ function orkify(args: string): void {
  */
 export function setup(): void {
   if (!existsSync(SOCKET_PATH)) return;
-  orkify('down all');
-  orkify('delete all');
-  orkify('kill');
+  orkify('kill --force');
 }
 
 /**
@@ -36,7 +34,5 @@ export function setup(): void {
  */
 export function teardown(): void {
   if (!existsSync(SOCKET_PATH)) return;
-  orkify('down all');
-  orkify('delete all');
-  orkify('kill');
+  orkify('kill --force');
 }

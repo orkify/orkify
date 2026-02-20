@@ -143,6 +143,39 @@ describe('Orchestrator edge cases', () => {
     }, 15000);
   });
 
+  describe('forceShutdown', () => {
+    it('should SIGKILL all children immediately', async () => {
+      const orchestrator = new Orchestrator();
+
+      try {
+        await orchestrator.up({
+          script: scriptPath,
+          name: 'force-1',
+          workers: 1,
+          cwd: tempDir,
+        });
+        await orchestrator.up({
+          script: scriptPath,
+          name: 'force-2',
+          workers: 1,
+          cwd: tempDir,
+        });
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        // forceShutdown should be synchronous (no waiting for SIGTERM)
+        const start = Date.now();
+        orchestrator.forceShutdown();
+        const elapsed = Date.now() - start;
+
+        expect(elapsed).toBeLessThan(500);
+        expect(orchestrator.list()).toHaveLength(0);
+      } finally {
+        orchestrator.forceShutdown();
+      }
+    }, 10000);
+  });
+
   describe('snap with --no-env', () => {
     it('snap({ noEnv: true }) strips env from snapshot file', async () => {
       const stateFile = join(tempDir, 'snapshot.yml');

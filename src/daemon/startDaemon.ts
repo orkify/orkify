@@ -17,6 +17,7 @@ import type {
   DeployOptions,
   DeployRestorePayload,
   DeploySettings,
+  KillPayload,
   LogsPayload,
   McpStartPayload,
   ProcessConfig,
@@ -433,11 +434,29 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
   });
 
   server.registerHandler(IPCMessageType.KILL_DAEMON, async (request) => {
+    const payload = request.payload as KillPayload | undefined;
+    const force = payload?.force === true;
+
     // Schedule shutdown after sending response
     setTimeout(async () => {
-      await gracefulShutdown();
-      if (!foreground) {
-        process.exit(0);
+      if (force) {
+        // Shut down MCP if running, then SIGKILL all children immediately
+        if (mcpServer) {
+          await mcpServer.shutdown().catch(() => {});
+          mcpServer = null;
+          mcpOptions = null;
+        }
+        orchestrator.forceShutdown();
+        cleanup();
+        await server.stop();
+        if (!foreground) {
+          process.exit(0);
+        }
+      } else {
+        await gracefulShutdown();
+        if (!foreground) {
+          process.exit(0);
+        }
       }
     }, 100);
 

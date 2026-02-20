@@ -342,6 +342,20 @@ describe('Kill Command', () => {
 
     orkify('delete test-kill-daemon');
   }, 20000);
+
+  it('kills the daemon with --force (immediate SIGKILL)', async () => {
+    orkify(`up ${EXAMPLES}/basic/app.js -n test-kill-force`);
+    await waitForProcessOnline('test-kill-force');
+
+    orkify('kill --force');
+    await waitForDaemonKilled(10000);
+
+    // Daemon should be fully gone — new command auto-starts a fresh daemon
+    const list = orkify('list');
+    expect(list).toBeDefined();
+
+    orkify('delete test-kill-force');
+  }, 20000);
 });
 
 describe('Background Worker Ready Signal', () => {

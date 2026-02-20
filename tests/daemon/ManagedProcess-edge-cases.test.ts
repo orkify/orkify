@@ -360,4 +360,54 @@ describe('ManagedProcess edge cases', () => {
       await container.stop();
     }, 10000);
   });
+
+  describe('forceKill', () => {
+    it('should SIGKILL a fork-mode process immediately', async () => {
+      const container = new ManagedProcess(0, createConfig());
+      await container.start();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+      expect(internal.forkProcess).not.toBeNull();
+
+      const start = Date.now();
+      container.forceKill();
+      const elapsed = Date.now() - start;
+
+      // forceKill is synchronous — should complete in < 100ms
+      expect(elapsed).toBeLessThan(100);
+      expect(internal.forkProcess).toBeNull();
+    }, 10000);
+
+    it('should SIGKILL a cluster primary immediately', async () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({ workerCount: 2, execMode: ExecMode.CLUSTER })
+      );
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+
+      // Mock a cluster primary
+      const mockPrimary = Object.assign(new EventEmitter(), {
+        connected: true,
+        pid: 9999,
+        stdout: null,
+        stderr: null,
+        send: () => true,
+        kill: () => true,
+      });
+      internal.clusterPrimary = mockPrimary;
+
+      container.forceKill();
+      expect(internal.clusterPrimary).toBeNull();
+    }, 10000);
+
+    it('should be safe to call when no process is running', () => {
+      const container = new ManagedProcess(0, createConfig());
+      // Should not throw
+      container.forceKill();
+    });
+  });
 });
