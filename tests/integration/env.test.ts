@@ -162,7 +162,7 @@ API_KEY=secret-key-123`
 
     // Force-kill the background daemon so orkify run can acquire the PID lock.
     orkify('kill --force');
-    await waitForDaemonKilled(20000);
+    await waitForDaemonKilled(10000);
 
     const proc = spawnOrkify(
       [

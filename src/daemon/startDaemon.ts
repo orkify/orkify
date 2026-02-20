@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import {
   closeSync,
   createReadStream,
@@ -440,17 +441,17 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
     // Schedule shutdown after sending response
     setTimeout(async () => {
       if (force) {
-        // Shut down MCP if running, then SIGKILL all children immediately
-        if (mcpServer) {
-          await mcpServer.shutdown().catch(() => {});
-          mcpServer = null;
-          mcpOptions = null;
-        }
-        orchestrator.forceShutdown();
+        // Remove PID file + socket first, then kill everything.
         cleanup();
-        await server.stop();
         if (!foreground) {
-          process.exit(0);
+          if (process.platform === 'win32') {
+            // Kill the entire process tree on Windows
+            execSync(`taskkill /T /F /PID ${process.pid}`, { stdio: 'ignore' });
+          } else {
+            // Kill the entire process group (daemon + all children + grandchildren)
+            // in one syscall. The daemon is the group leader (spawned detached).
+            process.kill(-process.pid, 'SIGKILL');
+          }
         }
       } else {
         await gracefulShutdown();
