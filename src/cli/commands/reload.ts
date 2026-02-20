@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import type { ProcessInfo, TargetPayload } from '../../types/index.js';
 import { IPCMessageType } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
+import { formatProcessTable } from './list.js';
 
 export const reloadCommand = new Command('reload')
   .description('Zero-downtime reload - rolling restart of workers')
@@ -19,11 +20,15 @@ export const reloadCommand = new Command('reload')
 
       if (response.success) {
         const results = response.data as ProcessInfo[];
+        if (results.length === 0) {
+          console.error(chalk.red(`✗ Process not found`));
+          process.exit(1);
+        }
+
         for (const info of results) {
           const staleWorkers = info.workers.filter((w) => w.stale);
           if (staleWorkers.length > 0) {
             console.log(chalk.yellow(`⚠ Process "${info.name}" reload partially failed`));
-            console.log(`  Workers: ${info.workers.length}`);
             console.log(
               chalk.yellow(
                 `  Stale workers: ${staleWorkers.map((w) => w.id).join(', ')} (old code still running)`
@@ -34,15 +39,14 @@ export const reloadCommand = new Command('reload')
             console.log(
               chalk.dim(`  Fork mode does not support zero-downtime reload — performed a restart`)
             );
-            console.log(`  Workers: ${info.workers.length}`);
           } else {
             console.log(chalk.green(`✓ Process "${info.name}" reloaded`));
-            console.log(`  Workers: ${info.workers.length}`);
           }
         }
-        if (results.length === 0) {
-          console.error(chalk.red(`✗ Process not found`));
-          process.exit(1);
+
+        const listResponse = await daemonClient.request(IPCMessageType.LIST);
+        if (listResponse.success) {
+          console.log(formatProcessTable(listResponse.data as ProcessInfo[]));
         }
       } else {
         console.error(chalk.red(`✗ Failed to reload: ${response.error}`));

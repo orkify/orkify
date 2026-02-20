@@ -5,6 +5,7 @@ import type { ProcessInfo } from '../../types/index.js';
 import { IPCMessageType, ProcessStatus } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
 import { isElevated, listAllUsers } from '../../ipc/MultiUserClient.js';
+import { sleep } from '../parse.js';
 
 function formatUptime(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -88,10 +89,10 @@ function joinTreeViewLines(tableStr: string): string {
   return lines.join('\n');
 }
 
-function renderProcessTable(
+export function formatProcessTable(
   processes: ProcessInfo[],
   options?: { showUser?: string; verbose?: boolean }
-): void {
+): string {
   const includeUser = options?.showUser !== undefined;
   const verbose = options?.verbose ?? false;
 
@@ -186,7 +187,68 @@ function renderProcessTable(
     }
   }
 
-  console.log(joinTreeViewLines(table.toString()));
+  return joinTreeViewLines(table.toString());
+}
+
+export function renderProcessTable(
+  processes: ProcessInfo[],
+  options?: { showUser?: string; verbose?: boolean }
+): void {
+  console.log(formatProcessTable(processes, options));
+}
+
+async function followList(verbose: boolean): Promise<void> {
+  // Test daemon connectivity before entering the loop
+  try {
+    await daemonClient.request(IPCMessageType.LIST);
+  } catch (err) {
+    const message = (err as Error).message;
+    if (message.includes('ECONNREFUSED') || message.includes('ENOENT')) {
+      console.log(chalk.gray('No processes running (daemon not started)'));
+    } else {
+      console.error(chalk.red(`✗ Error: ${message}`));
+    }
+    return;
+  }
+
+  let prevLines = 0;
+  let stopped = false;
+  let forceExit = false;
+
+  const onSigint = () => {
+    if (stopped) {
+      forceExit = true;
+      return;
+    }
+    stopped = true;
+  };
+  process.on('SIGINT', onSigint);
+
+  while (!stopped && !forceExit) {
+    try {
+      const response = await daemonClient.request(IPCMessageType.LIST);
+      if (!response.success) break;
+
+      const processes = response.data as ProcessInfo[];
+      const tableStr =
+        processes.length === 0
+          ? chalk.gray('No processes running')
+          : formatProcessTable(processes, { verbose });
+
+      if (process.stdout.isTTY && prevLines > 0) {
+        process.stdout.write(`\x1B[${prevLines}A\x1B[J`);
+      }
+
+      process.stdout.write(tableStr + '\n');
+      prevLines = tableStr.split('\n').length;
+    } catch {
+      break;
+    }
+
+    await sleep(1000);
+  }
+
+  process.removeListener('SIGINT', onSigint);
 }
 
 export const listCommand = new Command('list')
@@ -194,6 +256,7 @@ export const listCommand = new Command('list')
   .alias('status')
   .description('List all processes')
   .option('-v, --verbose', 'Show additional details including PIDs')
+  .option('-f, --follow', 'Live-update the process table (Ctrl+C to stop)')
   .option('--all-users', 'List processes from all users (requires sudo on Unix)')
   .action(async (options) => {
     if (options.allUsers) {
@@ -243,6 +306,13 @@ export const listCommand = new Command('list')
         process.exit(1);
       }
 
+      return;
+    }
+
+    // Follow mode — live-updating table
+    if (options.follow) {
+      await followList(options.verbose ?? false);
+      daemonClient.disconnect();
       return;
     }
 

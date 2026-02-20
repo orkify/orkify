@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import type { ProcessInfo, TargetPayload } from '../../types/index.js';
 import { IPCMessageType } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
+import { formatProcessTable } from './list.js';
 
 export const restartCommand = new Command('restart')
   .description('Restart process(es) - hard restart (kill + start)')
@@ -17,12 +18,17 @@ export const restartCommand = new Command('restart')
 
       if (response.success) {
         const results = response.data as ProcessInfo[];
-        for (const info of results) {
-          console.log(chalk.green(`↻ Process "${info.name}" restarted`));
-          console.log(`  Workers: ${info.workers.length}`);
-        }
         if (results.length === 0) {
           console.log(chalk.gray('No processes to restart'));
+        } else {
+          for (const info of results) {
+            console.log(chalk.green(`↻ Process "${info.name}" restarted`));
+          }
+
+          const listResponse = await daemonClient.request(IPCMessageType.LIST);
+          if (listResponse.success) {
+            console.log(formatProcessTable(listResponse.data as ProcessInfo[]));
+          }
         }
       } else {
         console.error(chalk.red(`✗ Failed to restart: ${response.error}`));

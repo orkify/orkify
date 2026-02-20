@@ -7,9 +7,51 @@ import {
   DEFAULT_LOG_MAX_FILES,
   DEFAULT_LOG_MAX_SIZE,
   IPCMessageType,
+  ProcessStatus,
 } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-import { parseLogSize, parseMemorySize, parseWorkers } from '../parse.js';
+import { parseLogSize, parseMemorySize, parseWorkers, sleep } from '../parse.js';
+import { formatProcessTable } from './list.js';
+
+function isAllOnline(processes: ProcessInfo[], name: string, expectedWorkers: number): boolean {
+  const proc = processes.find((p) => p.name === name);
+  if (!proc) return false;
+  if (proc.status === ProcessStatus.ERRORED) return true; // Don't wait forever on errors
+  if (expectedWorkers <= 1) {
+    return proc.status === ProcessStatus.ONLINE;
+  }
+  const onlineWorkers = proc.workers.filter((w) => w.status === ProcessStatus.ONLINE).length;
+  return onlineWorkers >= expectedWorkers;
+}
+
+async function waitForReady(name: string, expectedWorkers: number): Promise<void> {
+  const isTTY = process.stdout.isTTY;
+  let prevLines = 0;
+  const maxWait = 30_000;
+  const start = Date.now();
+
+  while (Date.now() - start < maxWait) {
+    const listResponse = await daemonClient.request(IPCMessageType.LIST);
+    if (!listResponse.success) break;
+
+    const processes = listResponse.data as ProcessInfo[];
+    const tableStr = formatProcessTable(processes);
+
+    if (isTTY && prevLines > 0) {
+      process.stdout.write(`\x1B[${prevLines}A\x1B[J`);
+    }
+
+    process.stdout.write(tableStr + '\n');
+    prevLines = tableStr.split('\n').length;
+
+    if (isAllOnline(processes, name, expectedWorkers)) return;
+
+    // Non-TTY: print once and stop (can't overwrite)
+    if (!isTTY) return;
+
+    await sleep(300);
+  }
+}
 
 export const upCommand = new Command('up')
   .description('Start a process in daemon mode')
@@ -86,12 +128,12 @@ export const upCommand = new Command('up')
       if (response.success) {
         const info = response.data as ProcessInfo;
         console.log(chalk.green(`✓ Process "${info.name}" started`));
-        console.log(`  ID: ${info.id}`);
-        console.log(`  Mode: ${info.execMode}`);
-        console.log(`  Workers: ${info.workers.length}`);
+        console.log(`  Mode: ${info.execMode} | Workers: ${info.workerCount}`);
         if (info.sticky) {
           console.log(`  Sticky sessions: enabled`);
         }
+
+        await waitForReady(info.name, info.workerCount);
       } else {
         console.error(chalk.red(`✗ Failed to start: ${response.error}`));
         process.exit(1);

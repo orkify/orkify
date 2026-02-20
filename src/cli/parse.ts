@@ -60,3 +60,7 @@ export function parseWorkers(value: string): number {
   if (num < 0) return Math.max(1, cpus().length + num);
   return num;
 }
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
