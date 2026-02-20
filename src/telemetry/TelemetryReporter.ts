@@ -121,6 +121,16 @@ export class TelemetryReporter extends EventEmitter {
     );
 
     this.orchestrator.on(
+      'worker:memoryRestart',
+      (data: { processName: string; workerId: number; memory: number; limit: number }) => {
+        this.pushEvent('worker:memoryRestart', data.processName, {
+          workerId: data.workerId,
+          details: { memory: data.memory, limit: data.limit },
+        });
+      }
+    );
+
+    this.orchestrator.on(
       'log',
       (data: { processName: string; workerId: number; type: string; data: string }) => {
         // Ring buffer for crash/error context (last N lines per worker)

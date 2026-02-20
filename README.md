@@ -127,6 +127,8 @@ orkify run app.js -w 4
 --log-max-age <days>      Delete rotated logs older than N days (default: 90, 0 = no limit)
 ```
 
+`--restart-on-mem <size>` — Restart when a worker's RSS exceeds [memory threshold](#memory-threshold-restart) (e.g. 512M, 1G)
+
 ## Cluster Mode
 
 When you specify `-w <workers>` with more than 1 worker, ORKIFY runs your app in cluster mode:
@@ -187,6 +189,23 @@ If a new worker fails to become ready after all retries:
 - Remaining worker slots are **aborted** to prevent cascading failures
 
 Fix the issue and reload again — a successful reload clears all stale flags.
+
+## Memory Threshold Restart
+
+Automatically restart workers when their RSS memory exceeds a threshold — a safety net for memory-leaking apps:
+
+```bash
+orkify up server.js -w 4 --restart-on-mem 512M
+```
+
+**How it works:**
+
+- Checked every 1 second (piggybacks on the existing stats collection interval)
+- **Per-worker**: each worker is checked individually against the threshold, not the aggregate cluster total
+- **Cluster mode**: zero-downtime — a replacement worker is spawned and must become ready before the old one is stopped
+- **Fork mode**: the process is stopped then restarted (brief downtime is unavoidable with a single process)
+- **30-second cooldown** per worker after each memory restart to let the new process stabilize
+- Counts as a restart (visible in `orkify list`) but **not** a crash — does not count toward `--max-restarts`
 
 ## Worker Readiness
 

@@ -361,6 +361,428 @@ describe('ManagedProcess edge cases', () => {
     }, 10000);
   });
 
+  describe('checkMemoryThreshold edge cases', () => {
+    it('should skip check during shutdown', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          restartOnMemory: 50 * 1024 * 1024,
+        })
+      );
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+
+      // Set memory above threshold but process is shutting down
+      internal.forkStats.memory = 100 * 1024 * 1024;
+      internal.isShuttingDown = true;
+
+      // Should not throw and should not trigger restart
+      expect(() => internal.checkMemoryThreshold()).not.toThrow();
+      expect(internal.forkRestarts).toBe(0);
+    });
+
+    it('should be a no-op when restartOnMemory is not set', () => {
+      const container = new ManagedProcess(0, createConfig());
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+      internal.forkStats.memory = 100 * 1024 * 1024;
+
+      expect(() => internal.checkMemoryThreshold()).not.toThrow();
+      expect(internal.forkRestarts).toBe(0);
+    });
+
+    it('should not restart when memory is exactly at threshold', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          restartOnMemory: 50 * 1024 * 1024,
+        })
+      );
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+
+      // Memory exactly at threshold — uses > not >=, so should NOT restart
+      internal.forkStats.memory = 50 * 1024 * 1024;
+
+      let emitted = false;
+      container.on('worker:memoryRestart', () => {
+        emitted = true;
+      });
+
+      internal.checkMemoryThreshold();
+      expect(internal.forkRestarts).toBe(0);
+      expect(emitted).toBe(false);
+    });
+
+    it('should not restart fork process when in cooldown', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          restartOnMemory: 50 * 1024 * 1024,
+        })
+      );
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+      internal.forkStats.memory = 100 * 1024 * 1024;
+      internal.lastMemoryRestart = Date.now(); // Just restarted
+
+      internal.checkMemoryThreshold();
+      expect(internal.forkRestarts).toBe(0);
+    });
+
+    it('should emit worker:memoryRestart event per worker in cluster mode', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          workerCount: 2,
+          execMode: ExecMode.CLUSTER,
+          restartOnMemory: 100 * 1024 * 1024,
+        })
+      );
+
+      const sentMessages: { type: string; workerId: number }[] = [];
+      const mockPrimary = Object.assign(new EventEmitter(), {
+        connected: true,
+        pid: 9999,
+        stdout: null,
+        stderr: null,
+        send: (msg: { type: string; workerId: number }) => {
+          sentMessages.push(msg);
+          return true;
+        },
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+      internal.clusterPrimary = mockPrimary;
+      internal.setupClusterHandlers(mockPrimary);
+
+      // Simulate two workers — only worker 1 exceeds the limit
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 1, pid: 5678 });
+      internal.clusterWorkers.get(0).memory = 50 * 1024 * 1024; // Under limit
+      internal.clusterWorkers.get(1).memory = 150 * 1024 * 1024; // Over limit
+
+      const events: { workerId: number; memory: number; limit: number }[] = [];
+      container.on(
+        'worker:memoryRestart',
+        (data: { workerId: number; memory: number; limit: number }) => {
+          events.push(data);
+        }
+      );
+
+      internal.checkMemoryThreshold();
+
+      // Only worker 1 should trigger
+      expect(events).toHaveLength(1);
+      expect(events[0].workerId).toBe(1);
+      expect(events[0].memory).toBe(150 * 1024 * 1024);
+      expect(events[0].limit).toBe(100 * 1024 * 1024);
+
+      // Should send restart-worker IPC for worker 1 only
+      const restartMsgs = sentMessages.filter((m) => m.type === 'restart-worker');
+      expect(restartMsgs).toHaveLength(1);
+      expect(restartMsgs[0].workerId).toBe(1);
+
+      internal.isShuttingDown = true;
+    });
+
+    it('cluster mode should check each worker individually, not aggregate', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          workerCount: 2,
+          execMode: ExecMode.CLUSTER,
+          restartOnMemory: 100 * 1024 * 1024,
+        })
+      );
+
+      const mockPrimary = Object.assign(new EventEmitter(), {
+        connected: true,
+        pid: 9999,
+        stdout: null,
+        stderr: null,
+        send: () => true,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+      internal.clusterPrimary = mockPrimary;
+      internal.setupClusterHandlers(mockPrimary);
+
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 1, pid: 5678 });
+
+      // Each worker under limit individually (60MB < 100MB), even though total is 120MB
+      internal.clusterWorkers.get(0).memory = 60 * 1024 * 1024;
+      internal.clusterWorkers.get(1).memory = 60 * 1024 * 1024;
+
+      let emitted = false;
+      container.on('worker:memoryRestart', () => {
+        emitted = true;
+      });
+
+      // Per-worker check: 60MB < 100MB — should NOT trigger for either worker
+      internal.checkMemoryThreshold();
+      expect(emitted).toBe(false);
+
+      // Push one worker over the limit
+      internal.clusterWorkers.get(0).memory = 150 * 1024 * 1024;
+
+      // Now worker 0 exceeds 100MB — should trigger for that worker only
+      internal.checkMemoryThreshold();
+      expect(emitted).toBe(true);
+
+      internal.isShuttingDown = true;
+    });
+
+    it('cluster mode should respect per-worker cooldown independently', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          workerCount: 2,
+          execMode: ExecMode.CLUSTER,
+          restartOnMemory: 100 * 1024 * 1024,
+        })
+      );
+
+      const mockPrimary = Object.assign(new EventEmitter(), {
+        connected: true,
+        pid: 9999,
+        stdout: null,
+        stderr: null,
+        send: () => true,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+      internal.clusterPrimary = mockPrimary;
+      internal.setupClusterHandlers(mockPrimary);
+
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 1, pid: 5678 });
+      internal.clusterWorkers.get(0).memory = 150 * 1024 * 1024;
+      internal.clusterWorkers.get(1).memory = 150 * 1024 * 1024;
+
+      const restartedWorkers: number[] = [];
+      container.on('worker:memoryRestart', (data: { workerId: number }) => {
+        restartedWorkers.push(data.workerId);
+      });
+
+      // First check — both workers exceed, both should restart
+      internal.checkMemoryThreshold();
+      expect(restartedWorkers).toEqual([0, 1]);
+
+      // Second check — both in cooldown, neither should restart
+      internal.checkMemoryThreshold();
+      expect(restartedWorkers).toEqual([0, 1]); // No new entries
+
+      // Clear cooldown for worker 0 only
+      internal.workerMemoryCooldowns.set(0, Date.now() - 31_000);
+
+      internal.checkMemoryThreshold();
+      // Worker 0 restarts again, worker 1 still in cooldown
+      expect(restartedWorkers).toEqual([0, 1, 0]);
+
+      internal.isShuttingDown = true;
+    });
+
+    it('cluster mode should not send IPC when isReloading is true', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          workerCount: 2,
+          execMode: ExecMode.CLUSTER,
+          restartOnMemory: 50 * 1024 * 1024,
+        })
+      );
+
+      const sentMessages: { type: string }[] = [];
+      const mockPrimary = Object.assign(new EventEmitter(), {
+        connected: true,
+        pid: 9999,
+        stdout: null,
+        stderr: null,
+        send: (msg: { type: string }) => {
+          sentMessages.push(msg);
+          return true;
+        },
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+      internal.clusterPrimary = mockPrimary;
+      internal.setupClusterHandlers(mockPrimary);
+
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+      internal.clusterWorkers.get(0).memory = 100 * 1024 * 1024;
+
+      // Set isReloading — memoryRestartWorker should early-return
+      internal.isReloading = true;
+
+      // The event still fires, but no IPC is sent to the primary
+      let eventEmitted = false;
+      container.on('worker:memoryRestart', () => {
+        eventEmitted = true;
+      });
+
+      internal.checkMemoryThreshold();
+      expect(eventEmitted).toBe(true);
+
+      // No restart-worker message sent
+      const restartMsgs = sentMessages.filter((m) => m.type === 'restart-worker');
+      expect(restartMsgs).toHaveLength(0);
+
+      internal.isShuttingDown = true;
+    });
+
+    it('cluster mode should not send IPC when primary is disconnected', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          workerCount: 2,
+          execMode: ExecMode.CLUSTER,
+          restartOnMemory: 50 * 1024 * 1024,
+        })
+      );
+
+      const sentMessages: { type: string }[] = [];
+      const mockPrimary = Object.assign(new EventEmitter(), {
+        connected: false, // Disconnected
+        pid: 9999,
+        stdout: null,
+        stderr: null,
+        send: (msg: { type: string }) => {
+          sentMessages.push(msg);
+          return true;
+        },
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+      internal.clusterPrimary = mockPrimary;
+      internal.setupClusterHandlers(mockPrimary);
+
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+      internal.clusterWorkers.get(0).memory = 100 * 1024 * 1024;
+
+      let eventEmitted = false;
+      container.on('worker:memoryRestart', () => {
+        eventEmitted = true;
+      });
+
+      // Should not throw despite disconnected primary
+      expect(() => internal.checkMemoryThreshold()).not.toThrow();
+      expect(eventEmitted).toBe(true);
+
+      // No restart-worker message sent
+      const restartMsgs = sentMessages.filter((m) => m.type === 'restart-worker');
+      expect(restartMsgs).toHaveLength(0);
+
+      internal.isShuttingDown = true;
+    });
+
+    it('cluster mode should track memoryRestartingWorkers to avoid crash counting', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          workerCount: 2,
+          execMode: ExecMode.CLUSTER,
+          restartOnMemory: 100 * 1024 * 1024,
+        })
+      );
+
+      const mockPrimary = Object.assign(new EventEmitter(), {
+        connected: true,
+        pid: 9999,
+        stdout: null,
+        stderr: null,
+        send: () => true,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+      internal.clusterPrimary = mockPrimary;
+      internal.setupClusterHandlers(mockPrimary);
+
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+      internal.clusterWorkers.get(0).memory = 150 * 1024 * 1024;
+
+      // Trigger memory restart — should add worker 0 to memoryRestartingWorkers
+      internal.checkMemoryThreshold();
+      expect(internal.memoryRestartingWorkers.has(0)).toBe(true);
+
+      // Simulate the old worker exiting (as if ClusterWrapper stopped it)
+      mockPrimary.emit('message', {
+        type: 'worker:exit',
+        workerId: 0,
+        pid: 1234,
+        code: null,
+        signal: 'SIGTERM',
+      });
+
+      // Crash counter should NOT increment because worker was in memoryRestartingWorkers
+      expect(internal.slotCrashes.get(0) ?? 0).toBe(0);
+      // memoryRestartingWorkers should be cleaned up
+      expect(internal.memoryRestartingWorkers.has(0)).toBe(false);
+
+      internal.isShuttingDown = true;
+    });
+
+    it('restart-worker-failed cleans up memoryRestartingWorkers', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          workerCount: 2,
+          execMode: ExecMode.CLUSTER,
+          restartOnMemory: 100 * 1024 * 1024,
+        })
+      );
+
+      const mockPrimary = Object.assign(new EventEmitter(), {
+        connected: true,
+        pid: 9999,
+        stdout: null,
+        stderr: null,
+        send: () => true,
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+      internal.clusterPrimary = mockPrimary;
+      internal.setupClusterHandlers(mockPrimary);
+
+      mockPrimary.emit('message', { type: 'worker:online', workerId: 0, pid: 1234 });
+      internal.clusterWorkers.get(0).memory = 150 * 1024 * 1024;
+
+      // Trigger memory restart
+      internal.checkMemoryThreshold();
+      expect(internal.memoryRestartingWorkers.has(0)).toBe(true);
+
+      // Simulate ClusterWrapper reporting that the replacement failed
+      mockPrimary.emit('message', { type: 'restart-worker-failed', workerId: 0 });
+
+      // Entry should be cleaned up
+      expect(internal.memoryRestartingWorkers.has(0)).toBe(false);
+
+      // Now if the worker crashes for a real reason, it SHOULD count as a crash
+      mockPrimary.emit('message', {
+        type: 'worker:exit',
+        workerId: 0,
+        pid: 1234,
+        code: 1,
+        signal: null,
+      });
+      expect(internal.slotCrashes.get(0) ?? 0).toBe(1);
+
+      internal.isShuttingDown = true;
+    });
+  });
+
   describe('forceKill', () => {
     it('should SIGKILL a fork-mode process immediately', async () => {
       const container = new ManagedProcess(0, createConfig());

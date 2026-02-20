@@ -22,6 +22,7 @@ export interface ProcessConfig {
   logMaxSize: number;
   logMaxFiles: number;
   logMaxAge: number;
+  restartOnMemory?: number;
 }
 
 export interface WorkerInfo {
@@ -108,6 +109,7 @@ export interface UpPayload {
   logMaxSize?: number;
   logMaxFiles?: number;
   logMaxAge?: number;
+  restartOnMemory?: number;
 }
 
 export interface KillPayload {
@@ -189,6 +191,7 @@ export type TelemetryEventType =
   | 'worker:crash'
   | 'worker:exit'
   | 'worker:maxRestarts'
+  | 'worker:memoryRestart'
   | 'worker:ready';
 
 export interface TelemetryEvent {

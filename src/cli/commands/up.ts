@@ -1,6 +1,5 @@
 import chalk from 'chalk';
 import { Command } from 'commander';
-import { cpus } from 'node:os';
 import { resolve } from 'node:path';
 import type { ProcessInfo, UpPayload } from '../../types/index.js';
 import {
@@ -8,61 +7,9 @@ import {
   DEFAULT_LOG_MAX_FILES,
   DEFAULT_LOG_MAX_SIZE,
   IPCMessageType,
-  MIN_LOG_MAX_SIZE,
 } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-
-/**
- * Parse workers option:
- * - "0" → CPU cores
- * - negative number → CPU cores minus that value (-1 = CPUs - 1)
- * - positive number → that many workers
- */
-function parseWorkers(value: string): number {
-  const num = parseInt(value, 10);
-  if (isNaN(num)) {
-    return 1;
-  }
-  if (num === 0) {
-    return cpus().length;
-  }
-  if (num < 0) {
-    // Negative: CPU cores minus the absolute value
-    return Math.max(1, cpus().length + num);
-  }
-  return num;
-}
-
-/**
- * Parse human-readable size string to bytes.
- * Supports: 100M, 500K, 1G, or raw byte count.
- */
-function parseSize(value: string): number {
-  const match = value.match(/^(\d+(?:\.\d+)?)\s*([kmg]?)b?$/i);
-  let bytes: number;
-  if (!match) {
-    const num = parseInt(value, 10);
-    bytes = isNaN(num) ? DEFAULT_LOG_MAX_SIZE : num;
-  } else {
-    const num = parseFloat(match[1]);
-    const unit = match[2].toLowerCase();
-    switch (unit) {
-      case 'k':
-        bytes = Math.round(num * 1024);
-        break;
-      case 'm':
-        bytes = Math.round(num * 1024 * 1024);
-        break;
-      case 'g':
-        bytes = Math.round(num * 1024 * 1024 * 1024);
-        break;
-      default:
-        bytes = Math.round(num);
-        break;
-    }
-  }
-  return Math.max(bytes, MIN_LOG_MAX_SIZE);
-}
+import { parseLogSize, parseMemorySize, parseWorkers } from '../parse.js';
 
 export const upCommand = new Command('up')
   .description('Start a process in daemon mode')
@@ -97,6 +44,8 @@ export const upCommand = new Command('up')
     'Delete rotated log files older than N days (0 = no age limit)',
     String(DEFAULT_LOG_MAX_AGE / (24 * 60 * 60 * 1000))
   )
+  .option('--restart-on-mem <size>', 'Restart when RSS exceeds threshold (e.g. 512M, 1G)')
+  .option('--restart-on-memory <size>', 'Alias for --restart-on-mem')
   .action(async (script: string, options) => {
     try {
       // Validate script path
@@ -104,6 +53,8 @@ export const upCommand = new Command('up')
         console.error(chalk.red('✗ Error: Script path is required'));
         process.exit(1);
       }
+
+      const restartOnMemRaw = options.restartOnMem || options.restartOnMemory;
 
       const payload: UpPayload = {
         script: resolve(options.cwd || process.cwd(), script),
@@ -124,9 +75,10 @@ export const upCommand = new Command('up')
         port: options.port ? parseInt(options.port, 10) : undefined,
         reloadRetries: parseInt(options.reloadRetries, 10),
         healthCheck: options.healthCheck,
-        logMaxSize: parseSize(options.logMaxSize),
+        logMaxSize: parseLogSize(options.logMaxSize),
         logMaxFiles: parseInt(options.logMaxFiles, 10),
         logMaxAge: parseInt(options.logMaxAge, 10) * 24 * 60 * 60 * 1000,
+        restartOnMemory: restartOnMemRaw ? parseMemorySize(restartOnMemRaw) : undefined,
       };
 
       const response = await daemonClient.request(IPCMessageType.UP, payload);

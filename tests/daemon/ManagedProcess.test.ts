@@ -339,6 +339,157 @@ describe('ManagedProcess', () => {
     });
   });
 
+  describe('memory threshold restart', () => {
+    it('restarts fork process when memory exceeds threshold', async () => {
+      const memScript = join(tempDir, 'mem-grow.js');
+      writeFileSync(
+        memScript,
+        `
+        const chunks = [];
+        setInterval(() => chunks.push(Buffer.alloc(5 * 1024 * 1024)), 200);
+        const http = require('http');
+        const server = http.createServer((req, res) => res.end('ok'));
+        server.listen(0, () => { if (process.send) process.send('ready'); });
+        process.on('SIGTERM', () => server.close(() => process.exit(0)));
+        `
+      );
+
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          script: memScript,
+          restartOnMemory: 50 * 1024 * 1024, // 50 MB
+        })
+      );
+
+      const memoryRestartPromise = new Promise<{ workerId: number; memory: number; limit: number }>(
+        (resolve) => {
+          container.on('worker:memoryRestart', (data) => resolve(data));
+        }
+      );
+
+      await container.start();
+
+      const data = await memoryRestartPromise;
+      expect(data.workerId).toBe(0);
+      expect(data.memory).toBeGreaterThan(50 * 1024 * 1024);
+      expect(data.limit).toBe(50 * 1024 * 1024);
+
+      // Wait for restart to complete
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      const info = container.getInfo();
+      expect(info.workers[0].restarts).toBeGreaterThanOrEqual(1);
+      expect(info.status).toBe(ProcessStatus.ONLINE);
+
+      await container.stop();
+    }, 30000);
+
+    it('increments restarts but NOT crashes on memory restart', async () => {
+      const memScript = join(tempDir, 'mem-grow-2.js');
+      writeFileSync(
+        memScript,
+        `
+        const chunks = [];
+        setInterval(() => chunks.push(Buffer.alloc(5 * 1024 * 1024)), 200);
+        const http = require('http');
+        const server = http.createServer((req, res) => res.end('ok'));
+        server.listen(0, () => { if (process.send) process.send('ready'); });
+        process.on('SIGTERM', () => server.close(() => process.exit(0)));
+        `
+      );
+
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          script: memScript,
+          restartOnMemory: 50 * 1024 * 1024,
+        })
+      );
+
+      const memoryRestartPromise = new Promise<void>((resolve) => {
+        container.on('worker:memoryRestart', () => resolve());
+      });
+
+      await container.start();
+      await memoryRestartPromise;
+
+      // Wait for restart to complete
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      const info = container.getInfo();
+      // Memory restart should increment restarts
+      expect(info.workers[0].restarts).toBeGreaterThanOrEqual(1);
+      // Memory restart should NOT increment crashes
+      expect(info.workers[0].crashes).toBe(0);
+
+      await container.stop();
+    }, 30000);
+
+    it('does not restart when under threshold', async () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          restartOnMemory: 1024 * 1024 * 1024, // 1 GB — way above any test process
+        })
+      );
+
+      let memoryRestartCount = 0;
+      container.on('worker:memoryRestart', () => {
+        memoryRestartCount++;
+      });
+
+      await container.start();
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      expect(memoryRestartCount).toBe(0);
+
+      await container.stop();
+    }, 10000);
+
+    it('does not restart when restartOnMemory is not set', async () => {
+      const container = new ManagedProcess(0, createConfig());
+
+      let memoryRestartCount = 0;
+      container.on('worker:memoryRestart', () => {
+        memoryRestartCount++;
+      });
+
+      await container.start();
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      expect(memoryRestartCount).toBe(0);
+
+      await container.stop();
+    }, 10000);
+
+    it('respects 30s cooldown after memory restart', async () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          restartOnMemory: 50 * 1024 * 1024,
+        })
+      );
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const internal = container as any;
+
+      // Simulate that a memory restart just happened
+      internal.lastMemoryRestart = Date.now();
+
+      // Manually set forkStats.memory above threshold
+      internal.forkStats.memory = 100 * 1024 * 1024;
+
+      // checkMemoryThreshold should skip due to cooldown
+      internal.checkMemoryThreshold();
+
+      // No restart should have been triggered
+      expect(internal.forkRestarts).toBe(0);
+
+      await container.stop();
+    }, 10000);
+  });
+
   describe('cluster mode metrics-based status recovery', () => {
     function createClusterContainer() {
       const container = new ManagedProcess(

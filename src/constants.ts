@@ -40,6 +40,7 @@ export const MIN_LOG_MAX_SIZE = 1024; // 1 KB floor
 export const DEFAULT_LOG_MAX_SIZE = 100 * 1024 * 1024; // 100 MB
 export const DEFAULT_LOG_MAX_FILES = 90;
 export const DEFAULT_LOG_MAX_AGE = 90 * 24 * 60 * 60 * 1000; // 90 days in ms
+export const MEMORY_RESTART_COOLDOWN = 30_000; // 30s cooldown after memory-triggered restart
 
 // Process status
 export const ProcessStatus = {

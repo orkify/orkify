@@ -90,6 +90,7 @@ export class Orchestrator extends EventEmitter {
       logMaxSize: payload.logMaxSize ?? DEFAULT_LOG_MAX_SIZE,
       logMaxFiles: payload.logMaxFiles ?? DEFAULT_LOG_MAX_FILES,
       logMaxAge: payload.logMaxAge ?? DEFAULT_LOG_MAX_AGE,
+      restartOnMemory: payload.restartOnMemory,
     };
 
     const processId = this.nextProcessId++;
@@ -110,6 +111,10 @@ export class Orchestrator extends EventEmitter {
 
     container.on('worker:maxRestarts', (workerId) => {
       this.emit('worker:maxRestarts', { processName: name, workerId });
+    });
+
+    container.on('worker:memoryRestart', (data) => {
+      this.emit('worker:memoryRestart', { processName: name, ...data });
     });
 
     container.on('worker:error:captured', (data) => {
@@ -278,6 +283,7 @@ export class Orchestrator extends EventEmitter {
           logMaxSize: config.logMaxSize,
           logMaxFiles: config.logMaxFiles,
           logMaxAge: config.logMaxAge,
+          restartOnMemory: config.restartOnMemory,
         });
 
         results.push(info);
@@ -372,6 +378,7 @@ export class Orchestrator extends EventEmitter {
         logMaxSize: config.logMaxSize,
         logMaxFiles: config.logMaxFiles,
         logMaxAge: config.logMaxAge,
+        restartOnMemory: config.restartOnMemory,
       };
 
       if (!runningNames.has(config.name)) {
@@ -413,6 +420,7 @@ export class Orchestrator extends EventEmitter {
       'maxRestarts',
       'minUptime',
       'restartDelay',
+      'restartOnMemory',
     ];
 
     for (const key of keys) {

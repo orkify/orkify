@@ -420,6 +420,50 @@ async function reload(): Promise<void> {
   }
 }
 
+async function restartWorker(slotId: number): Promise<void> {
+  if (isShuttingDown || isReloading) return;
+
+  const oldState = Array.from(workers.values()).find((w) => w.id === slotId);
+  if (!oldState) return;
+
+  log(`Memory restart: replacing worker ${slotId}...`);
+
+  const newState = spawnWorker(slotId);
+  reloadCandidateWorkerIds.add(newState.worker.id);
+
+  try {
+    await waitForReady(newState, 30000);
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Promote new worker
+    reloadCandidateWorkerIds.delete(newState.worker.id);
+
+    // Stop old worker gracefully (disconnect → SIGTERM)
+    await stopWorker(oldState);
+
+    log(`Worker ${slotId} replaced (memory restart)`);
+
+    if (process.send) {
+      process.send({ type: 'worker:online', workerId: slotId, pid: newState.pid });
+      if (newState.ready) {
+        process.send({ type: 'worker:listening', workerId: slotId });
+      }
+    }
+  } catch {
+    // Replacement failed — kill it, keep old worker
+    log(`Memory restart of worker ${slotId} failed, keeping old worker`);
+    try {
+      newState.worker.kill('SIGKILL');
+    } catch {
+      // Worker might already be dead
+    }
+    reloadCandidateWorkerIds.delete(newState.worker.id);
+    if (process.send) {
+      process.send({ type: 'restart-worker-failed', workerId: slotId });
+    }
+  }
+}
+
 async function checkHealth(port: number, path: string): Promise<void> {
   const url = `http://localhost:${port}${path}`;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -583,6 +627,9 @@ process.on('message', async (message: unknown) => {
   switch (msg.type) {
     case 'reload':
       await reload();
+      break;
+    case 'restart-worker':
+      await restartWorker(msg.workerId as number);
       break;
     case 'shutdown':
       await shutdown();

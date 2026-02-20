@@ -358,6 +358,46 @@ describe('Kill Command', () => {
   }, 20000);
 });
 
+describe('Memory Threshold Restart', () => {
+  it('--restart-on-mem restarts process when memory exceeds limit', async () => {
+    const appName = 'test-mem-restart';
+
+    orkify(`up ${EXAMPLES}/basic/mem-hog.js -n ${appName} --restart-on-mem 50M`);
+    await waitForProcessOnline(appName);
+
+    // Wait for memory to grow and trigger a restart
+    const start = Date.now();
+    let restarted = false;
+    while (Date.now() - start < 30000) {
+      const list = orkify('list');
+      const lines = list.split('\n');
+      for (const line of lines) {
+        if (line.includes(appName)) {
+          // Look for restart count > 0 (the ↺ column)
+          const match = line.match(/│\s*(\d+)\s*│\s*\d+\s*│\s*online/);
+          if (match && parseInt(match[1], 10) > 0) {
+            restarted = true;
+            break;
+          }
+        }
+      }
+      if (restarted) break;
+      await sleep(500);
+    }
+
+    expect(restarted).toBe(true);
+
+    // Process should still be online after restart
+    const list = orkify('list');
+    const lines = list.split('\n');
+    const processLine = lines.find((l) => l.includes(appName));
+    expect(processLine).toBeDefined();
+    expect(processLine).toContain('online');
+
+    orkify(`delete ${appName}`);
+  }, 45000);
+});
+
 describe('Background Worker Ready Signal', () => {
   const appName = 'test-bg-ready';
   let tempDir: string;

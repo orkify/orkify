@@ -137,6 +137,25 @@ describe('TelemetryReporter', () => {
       expect(body.events[0].type).toBe('worker:maxRestarts');
       expect(body.events[0].workerId).toBe(2);
     });
+
+    it('buffers worker:memoryRestart events with memory details', async () => {
+      reporter.start();
+
+      (orchestrator as unknown as EventEmitter).emit('worker:memoryRestart', {
+        processName: 'app',
+        workerId: 0,
+        memory: 600 * 1024 * 1024,
+        limit: 512 * 1024 * 1024,
+      });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.events[0].type).toBe('worker:memoryRestart');
+      expect(body.events[0].workerId).toBe(0);
+      expect(body.events[0].details.memory).toBe(600 * 1024 * 1024);
+      expect(body.events[0].details.limit).toBe(512 * 1024 * 1024);
+    });
   });
 
   describe('crash events with log ring buffer', () => {

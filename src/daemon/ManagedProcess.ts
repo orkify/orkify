@@ -10,6 +10,7 @@ import {
   ExecMode,
   LAUNCH_TIMEOUT,
   LOGS_DIR,
+  MEMORY_RESTART_COOLDOWN,
   METRICS_PROBE_IMPORT,
   ProcessStatus,
 } from '../constants.js';
@@ -65,6 +66,9 @@ export class ManagedProcess extends EventEmitter {
   private forkLaunchTimer: NodeJS.Timeout | null = null;
   private detectedPort: number | undefined;
   private primaryRestarts = 0;
+  private lastMemoryRestart = 0;
+  private workerMemoryCooldowns = new Map<number, number>();
+  private memoryRestartingWorkers = new Set<number>();
   private forkStats = {
     memory: 0,
     cpu: 0,
@@ -395,11 +399,16 @@ export class ManagedProcess extends EventEmitter {
             this.slotRestarts.set(exitedWorkerId, newRestarts);
             // Only delete if PID matches — during reload, a new worker already holds this slot
             if (!exitedPid || existing.pid === exitedPid) {
-              // Tracked worker exited — count as error if not a deliberate shutdown or reload
-              if (!this.isShuttingDown && !this.isReloading) {
+              // Tracked worker exited — count as error if not a deliberate shutdown, reload, or memory restart
+              if (
+                !this.isShuttingDown &&
+                !this.isReloading &&
+                !this.memoryRestartingWorkers.has(exitedWorkerId)
+              ) {
                 const newCrashes = (existing.crashes ?? 0) + 1;
                 this.slotCrashes.set(exitedWorkerId, newCrashes);
               }
+              this.memoryRestartingWorkers.delete(exitedWorkerId);
               this.clusterWorkers.delete(exitedWorkerId);
             } else {
               // PID mismatch: new worker already holds slot — carry the counter forward
@@ -476,6 +485,11 @@ export class ManagedProcess extends EventEmitter {
             }
           }
           this.emit('reload:complete', { results });
+          break;
+        }
+
+        case 'restart-worker-failed': {
+          this.memoryRestartingWorkers.delete(msg.workerId as number);
           break;
         }
 
@@ -682,6 +696,71 @@ export class ManagedProcess extends EventEmitter {
         }
       }
     }
+
+    this.checkMemoryThreshold();
+  }
+
+  private checkMemoryThreshold(): void {
+    const limit = this.config.restartOnMemory;
+    if (!limit) return;
+    if (this.isShuttingDown) return;
+
+    if (this.config.execMode === ExecMode.FORK) {
+      // Cooldown: skip checks for 30s after a memory-triggered restart
+      if (Date.now() - this.lastMemoryRestart < MEMORY_RESTART_COOLDOWN) return;
+
+      if (this.forkStats.memory > limit) {
+        console.log(
+          `[${this.config.name}] RSS ${formatBytes(this.forkStats.memory)} exceeds ${formatBytes(limit)}, restarting`
+        );
+        this.lastMemoryRestart = Date.now();
+        this.forkRestarts++;
+        this.emit('worker:memoryRestart', {
+          workerId: 0,
+          memory: this.forkStats.memory,
+          limit,
+        });
+        this.memoryRestartFork().catch((err) => {
+          console.error(
+            `[${this.config.name}] Memory-triggered restart failed:`,
+            (err as Error).message
+          );
+        });
+      }
+    } else {
+      // Cluster: check each worker individually
+      for (const [workerId, state] of this.clusterWorkers) {
+        const lastRestart = this.workerMemoryCooldowns.get(workerId) ?? 0;
+        if (Date.now() - lastRestart < MEMORY_RESTART_COOLDOWN) continue;
+
+        if (state.memory > limit) {
+          console.log(
+            `[${this.config.name}] Worker ${workerId} RSS ${formatBytes(state.memory)} exceeds ${formatBytes(limit)}, restarting worker`
+          );
+          this.workerMemoryCooldowns.set(workerId, Date.now());
+          this.emit('worker:memoryRestart', {
+            workerId,
+            memory: state.memory,
+            limit,
+          });
+          this.memoryRestartWorker(workerId);
+        }
+      }
+    }
+  }
+
+  private async memoryRestartFork(): Promise<void> {
+    await this.stop();
+    this.isShuttingDown = false;
+    this.forkReady = false;
+    this.setupLogStreams();
+    await this.start();
+  }
+
+  private memoryRestartWorker(workerId: number): void {
+    if (this.isReloading || !this.clusterPrimary?.connected) return;
+    this.memoryRestartingWorkers.add(workerId);
+    this.clusterPrimary.send({ type: 'restart-worker', workerId });
   }
 
   async stop(): Promise<void> {
@@ -796,6 +875,9 @@ export class ManagedProcess extends EventEmitter {
     this.forkCrashes = 0;
     this.forkReady = false;
     this.primaryRestarts = 0;
+    this.lastMemoryRestart = 0;
+    this.workerMemoryCooldowns.clear();
+    this.memoryRestartingWorkers.clear();
     this.clusterWorkers.clear();
     this.slotRestarts.clear();
     this.slotCrashes.clear();
@@ -976,4 +1058,17 @@ export class ManagedProcess extends EventEmitter {
     }
     return !!this.clusterPrimary && !this.isShuttingDown;
   }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  }
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${bytes} B`;
 }
