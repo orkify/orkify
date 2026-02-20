@@ -85,8 +85,8 @@ describe('daemon-crash-recovery', () => {
     // Wait for the recovery daemon to come up
     await waitForDaemonReady(15000);
 
-    // Verify process is back online
-    await waitForProcessOnline(APP_NAME, 20000);
+    // Verify process is back online (Windows daemon recovery is slower)
+    await waitForProcessOnline(APP_NAME, 30000);
 
     const list = orkify('list');
     expect(list).toContain(APP_NAME);

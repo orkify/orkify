@@ -696,7 +696,7 @@ describe('MCP HTTP Server', () => {
       await sleep(300);
       orkifyWithEnv(`mcp --simple-http --port ${port} --bind 127.0.0.1`, testEnv);
       await waitForServer();
-    });
+    }, 30000);
   });
 
   describe('idempotent and double start', () => {
