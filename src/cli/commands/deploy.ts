@@ -126,8 +126,8 @@ deployCommand
       });
 
       if (!uploadResp.ok) {
-        const body = await uploadResp.text();
-        console.error(chalk.red(`✗ Upload request failed: ${uploadResp.status} ${body}`));
+        const msg = await parseErrorBody(uploadResp);
+        console.error(chalk.red(`✗ Artifact upload failed: ${msg}`));
         process.exit(1);
       }
 
@@ -149,7 +149,8 @@ deployCommand
       });
 
       if (!putResp.ok) {
-        console.error(chalk.red(`✗ S3 upload failed: ${putResp.status}`));
+        const msg = await parseErrorBody(putResp);
+        console.error(chalk.red(`✗ Artifact storage failed: ${msg}`));
         process.exit(1);
       }
 
@@ -163,8 +164,8 @@ deployCommand
       });
 
       if (!confirmResp.ok) {
-        const body = await confirmResp.text();
-        console.error(chalk.red(`✗ Upload confirmation failed: ${body}`));
+        const msg = await parseErrorBody(confirmResp);
+        console.error(chalk.red(`✗ Artifact confirmation failed: ${msg}`));
         process.exit(1);
       }
 
@@ -290,7 +291,17 @@ deployCommand
     }
   });
 
-function formatSize(bytes: number): string {
+export async function parseErrorBody(resp: Response): Promise<string> {
+  try {
+    const json = (await resp.json()) as { error?: string };
+    if (json.error) return json.error;
+  } catch {
+    // Not JSON — fall through to text
+  }
+  return `${resp.status} ${resp.statusText}`;
+}
+
+export function formatSize(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;
   const sizes = ['B', 'KB', 'MB', 'GB'];
@@ -298,7 +309,7 @@ function formatSize(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
-async function computeSha256(filePath: string): Promise<string> {
+export async function computeSha256(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = createHash('sha256');
     const stream = createReadStream(filePath);

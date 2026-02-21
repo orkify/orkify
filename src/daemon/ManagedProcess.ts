@@ -620,7 +620,7 @@ export class ManagedProcess extends EventEmitter {
         const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
         if (resp.status >= 200 && resp.status < 300) return;
       } catch {
-        // Retry
+        // Retry — app may still be booting
       }
       if (attempt < 2) await new Promise((r) => setTimeout(r, 1000));
     }

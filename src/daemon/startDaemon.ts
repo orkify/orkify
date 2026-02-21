@@ -544,8 +544,11 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
             skipSignalHandlers: true,
           });
           mcpOptions = oldOptions;
-        } catch {
-          // Old server can't be restored either — MCP is down
+        } catch (restoreErr) {
+          console.error(
+            'MCP server is down — failed to restore previous config:',
+            (restoreErr as Error).message
+          );
         }
         throw err;
       }
@@ -626,7 +629,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
     try {
       // Shut down MCP HTTP server first (before closing the IPC server)
       if (mcpServer) {
-        await mcpServer.shutdown().catch(() => {});
+        await mcpServer.shutdown().catch((err) => {
+          console.error('MCP server shutdown error:', (err as Error).message);
+        });
         mcpServer = null;
         mcpOptions = null;
       }

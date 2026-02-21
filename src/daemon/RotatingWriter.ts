@@ -106,7 +106,9 @@ export class RotatingWriter {
       // Chain compressions so they run sequentially and drain() awaits all of them
       this.compressionChain = this.compressionChain
         .then(() => this.compressAndPrune(rotatedPath))
-        .catch(() => {});
+        .catch((err) => {
+          console.error(`Log compression error (${rotatedPath}):`, (err as Error).message);
+        });
     } catch (err) {
       this.rotating = false;
       console.error(`Log rotation error (${this.filePath}):`, (err as Error).message);

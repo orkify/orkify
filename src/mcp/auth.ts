@@ -144,7 +144,8 @@ export function appendKeyToConfig(key: McpKey, configPath: string = MCP_CONFIG_F
   let config: McpConfig;
   try {
     config = loadMcpConfig(configPath);
-  } catch {
+  } catch (err) {
+    console.error('Failed to load MCP config, starting fresh:', (err as Error).message);
     config = { keys: [] };
   }
 
