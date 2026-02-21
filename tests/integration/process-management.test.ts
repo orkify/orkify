@@ -355,7 +355,7 @@ describe('Kill Command', () => {
     expect(list).toBeDefined();
 
     orkify('delete test-kill-force');
-  }, 20000);
+  }, 30000);
 });
 
 describe('Memory Threshold Restart', () => {

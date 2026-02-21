@@ -316,7 +316,9 @@ export async function waitForDaemonKilled(maxWait = 5000): Promise<void> {
   // can disappear before the process finishes cleanup.
   if (daemonPid) {
     const remaining = maxWait - (Date.now() - start);
-    await waitForPidDead(daemonPid, Math.max(remaining, 10000));
+    if (remaining > 0) {
+      await waitForPidDead(daemonPid, remaining);
+    }
   }
 }
 
