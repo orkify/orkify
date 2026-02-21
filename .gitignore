@@ -43,6 +43,8 @@ Thumbs.db
 
 # Claude Code (keep shared settings, ignore local)
 .claude/settings.local.json
+.claude/commands
+.claude/scripts
 
 # ORKIFY runtime files (user home directory)
 # These are created at ~/.orkify/ but listed here for reference
