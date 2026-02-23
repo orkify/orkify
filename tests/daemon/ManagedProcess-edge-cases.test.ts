@@ -203,17 +203,15 @@ describe('ManagedProcess edge cases', () => {
         container.on('worker:maxRestarts', () => resolve());
       });
 
-      // Calculate intervals between exits
-      const intervals: number[] = [];
-      for (let i = 1; i < exitTimes.length; i++) {
-        intervals.push(exitTimes[i] - exitTimes[i - 1]);
-      }
-
-      // With exponential backoff, later intervals should be larger than earlier ones.
-      // Currently they're all ~restartDelay (100ms).
-      expect(intervals.length).toBeGreaterThanOrEqual(3);
-      // The last interval should be notably larger than the first
-      expect(intervals[intervals.length - 1]).toBeGreaterThan(intervals[0] * 1.5);
+      // With 4 restarts and restartDelay=100ms, exponential backoff gives
+      // delays of 100 + 200 + 400 + 800 = 1500ms total.
+      // Without backoff (fixed 100ms), total would be ~400ms.
+      // Assert total elapsed time proves backoff is happening.
+      // We use a threshold well above 400ms but below 1500ms to account
+      // for process spawn overhead inflating every interval equally.
+      expect(exitTimes.length).toBeGreaterThanOrEqual(4);
+      const totalElapsed = exitTimes[exitTimes.length - 1] - exitTimes[0];
+      expect(totalElapsed).toBeGreaterThan(800);
 
       await container.stop();
     }, 15000);

@@ -91,6 +91,7 @@ export class Orchestrator extends EventEmitter {
       logMaxFiles: payload.logMaxFiles ?? DEFAULT_LOG_MAX_FILES,
       logMaxAge: payload.logMaxAge ?? DEFAULT_LOG_MAX_AGE,
       restartOnMemory: payload.restartOnMemory,
+      cron: payload.cron,
     };
 
     const processId = this.nextProcessId++;
@@ -284,6 +285,7 @@ export class Orchestrator extends EventEmitter {
           logMaxFiles: config.logMaxFiles,
           logMaxAge: config.logMaxAge,
           restartOnMemory: config.restartOnMemory,
+          cron: config.cron,
         });
 
         results.push(info);
@@ -297,11 +299,11 @@ export class Orchestrator extends EventEmitter {
 
   async restoreFromSnapshot(
     file?: string
-  ): Promise<{ processes: ProcessInfo[]; mcpState?: McpStartPayload }> {
+  ): Promise<{ processes: ProcessInfo[]; configs: ProcessConfig[]; mcpState?: McpStartPayload }> {
     const store = file ? new StateStore(file) : this.stateStore;
     const state: SavedState = await store.loadFull();
     const processes = await this.restoreFromMemory(state.processes);
-    return { processes, mcpState: state.mcp };
+    return { processes, configs: state.processes, mcpState: state.mcp };
   }
 
   async shutdown(): Promise<void> {
@@ -379,6 +381,7 @@ export class Orchestrator extends EventEmitter {
         logMaxFiles: config.logMaxFiles,
         logMaxAge: config.logMaxAge,
         restartOnMemory: config.restartOnMemory,
+        cron: config.cron,
       };
 
       if (!runningNames.has(config.name)) {
@@ -432,6 +435,10 @@ export class Orchestrator extends EventEmitter {
         return true;
       }
     }
+
+    // Deep-compare cron (array of objects, not simple primitives)
+    if (JSON.stringify(running.cron ?? []) !== JSON.stringify(target.cron ?? [])) return true;
+
     return false;
   }
 
@@ -472,6 +479,10 @@ export class Orchestrator extends EventEmitter {
   getProcess(target: number | string): ManagedProcess | undefined {
     const containers = this.resolveTarget(target);
     return containers[0];
+  }
+
+  getCronSecret(name: string): string | undefined {
+    return this.getProcessByName(name)?.cronSecret;
   }
 
   getProcessByName(name: string): ManagedProcess | undefined {

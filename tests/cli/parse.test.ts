@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { parseLogSize, parseMemorySize, parseWorkers } from '../../src/cli/parse.js';
+import {
+  parseCronSpecs,
+  parseLogSize,
+  parseMemorySize,
+  parseWorkers,
+} from '../../src/cli/parse.js';
 
 describe('parseLogSize', () => {
   it('parses megabytes', () => {
@@ -126,5 +131,59 @@ describe('parseWorkers', () => {
   it('clamps negative result to at least 1', () => {
     // Even with an absurdly negative value, should return at least 1
     expect(parseWorkers('-9999')).toBe(1);
+  });
+});
+
+describe('parseCronSpecs', () => {
+  it('parses a valid single spec', () => {
+    const result = parseCronSpecs(['*/2 * * * * /api/check']);
+    expect(result).toEqual([{ schedule: '*/2 * * * *', path: '/api/check' }]);
+  });
+
+  it('parses multiple specs', () => {
+    const result = parseCronSpecs(['*/5 * * * * /api/health', '0 0 * * * /api/daily']);
+    expect(result).toEqual([
+      { schedule: '*/5 * * * *', path: '/api/health' },
+      { schedule: '0 0 * * *', path: '/api/daily' },
+    ]);
+  });
+
+  it('exits on too few tokens', () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit');
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(() => parseCronSpecs(['* * * /api'])).toThrow('process.exit');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    exitSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it('exits on invalid schedule', () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit');
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(() => parseCronSpecs(['invalid * * * * /api'])).toThrow('process.exit');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    exitSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it('exits on invalid path (missing leading slash)', () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit');
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(() => parseCronSpecs(['*/5 * * * * api/check'])).toThrow('process.exit');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+
+    exitSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 });

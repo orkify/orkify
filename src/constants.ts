@@ -124,6 +124,34 @@ try {
     }, 2000);
     t.unref();
 
+    // Port auto-detection for fork mode: hook net.Server.listen to report
+    // the first port the child binds, mirroring cluster mode's worker:listening.
+    // Falls back to PORT env var if the monkey-patch fails.
+    try {
+      const net = await import("node:net");
+      const _origListen = net.Server.prototype.listen;
+      let _portReported = false;
+      net.Server.prototype.listen = function(...args) {
+        if (!_portReported) {
+          this.once("listening", () => {
+            if (!_portReported) {
+              const addr = this.address();
+              if (addr && typeof addr === "object" && addr.port) {
+                _portReported = true;
+                s({ __orkify: true, type: "listening", data: { port: addr.port } });
+              }
+            }
+          });
+        }
+        return _origListen.apply(this, args);
+      };
+    } catch {
+      const envPort = parseInt(process.env.PORT || "", 10);
+      if (envPort > 0) {
+        s({ __orkify: true, type: "listening", data: { port: envPort } });
+      }
+    }
+
     // Mirrors parseUserFrames() in src/probe/parse-frames.ts — keep in sync
     function _orkifyParseUserFrames(stack) {
       const frames = [];

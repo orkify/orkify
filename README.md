@@ -20,6 +20,7 @@ Modern JS process orchestration and deployment for your own infrastructure.
 - [Boot Persistence](#boot-persistence)
 - [Container Mode](#container-mode)
 - [Deployment](#deployment)
+- [Cron Scheduler](#cron-scheduler)
 - [MCP Integration](#mcp-integration)
 - [Architecture](#architecture)
 - [Requirements](#requirements)
@@ -36,6 +37,7 @@ Modern JS process orchestration and deployment for your own infrastructure.
 - **File Watching** - Reload on file changes during development
 - **Log Rotation** - Automatic log rotation with gzip compression and configurable retention
 - **Deployment** - Local and remote deploy with automatic rollback
+- **Cron Scheduler** - Built-in cron that dispatches HTTP requests to managed processes on a schedule
 - **Native TypeScript** - Run `.ts` files directly with no build step (Node.js 22.18+)
 - **Modern Stack** - Pure ESM, TypeScript, Node.js 22.18+
 - **MCP Integration** - Built-in Model Context Protocol server for AI tool integration
@@ -126,6 +128,7 @@ orkify run app.js -w 4
 --log-max-size <size>     Max log file size before rotation (default: 100M)
 --log-max-files <count>   Rotated log files to keep (default: 90, 0 = no rotation)
 --log-max-age <days>      Delete rotated logs older than N days (default: 90, 0 = no limit)
+--cron <spec>             Cron job (repeatable) — see Cron Scheduler
 ```
 
 `--restart-on-mem <size>` — Restart when a worker's RSS exceeds [memory threshold](#memory-threshold-restart) (e.g. 512M, 1G)
@@ -210,7 +213,7 @@ orkify up server.js -w 4 --restart-on-mem 512M
 
 ## Worker Readiness
 
-orkify auto-detects when cluster workers start listening on a port via Node's `cluster` `listening` event — no extra code needed. If your app calls `server.listen()`, workers are automatically marked as `online`.
+orkify auto-detects when your app starts listening on a port — no extra code needed. If your app calls `server.listen()`, workers are automatically marked as `online`. This works in both fork mode and cluster mode.
 
 For background workers or queue consumers that **don't bind a port**, signal ready manually:
 
@@ -493,6 +496,7 @@ processes:
 | `port`          | —                  | Port for sticky session routing                          |
 | `reloadRetries` | `3`                | Retries per worker slot during reload (0-3)              |
 | `healthCheck`   | —                  | Health check endpoint path (e.g. `/health`)              |
+| `cron`          | —                  | [Cron jobs](#cron-scheduler) (array of schedule + path)  |
 | `logMaxSize`    | `104857600`        | Max log file size in bytes before rotation (100 MB)      |
 | `logMaxFiles`   | `90`               | Max rotated log files to keep (0 = no rotation)          |
 | `logMaxAge`     | `7776000000`       | Max age of rotated logs in ms (90 days, 0 = no limit)    |
@@ -792,6 +796,104 @@ The CLI works standalone without orkify.com. Connect it by setting an API key:
 ```bash
 ORKIFY_API_KEY=orkify_xxx orkify up app.js
 ```
+
+## Cron Scheduler
+
+The daemon includes a built-in cron scheduler that dispatches HTTP requests to managed processes on a schedule. This lets you trigger periodic tasks (health checks, cleanup jobs, cache warming) without external cron infrastructure.
+
+### Usage
+
+```bash
+# Run a cron job every 2 minutes
+orkify up app.js --cron "*/2 * * * * /api/cron/heartbeat-check"
+
+# Multiple cron jobs
+orkify up app.js \
+  --cron "*/2 * * * * /api/cron/heartbeat-check" \
+  --cron "0 * * * * /api/cron/cleanup"
+```
+
+The `--cron` format is `"<schedule> <path>"` — the last whitespace-delimited token is the HTTP path, everything before it is the cron expression.
+
+### Ecosystem Config
+
+```yaml
+# orkify.yml
+processes:
+  - name: web
+    script: server.js
+    workers: 4
+    cron:
+      - schedule: '*/2 * * * *'
+        path: /api/cron/heartbeat-check
+      - schedule: '0 * * * *'
+        path: /api/cron/cleanup
+        method: POST # default: GET
+        timeout: 60000 # ms, default: 30000
+```
+
+### How It Works
+
+1. When a job is due, the scheduler looks up the process port via the orchestrator
+2. It makes an HTTP request to `http://localhost:{port}{path}` with the cron secret as `Authorization: Bearer <secret>`
+3. In cluster mode, the OS routes each request to a single worker — no duplication across workers
+4. The port is auto-detected when your app calls `server.listen()` — works in both fork and cluster mode
+
+### Limits
+
+| Limit            | Value    | Reason                                                                      |
+| ---------------- | -------- | --------------------------------------------------------------------------- |
+| Minimum interval | 1 minute | Cron has minute granularity; jobs fire within seconds of their target time  |
+| Maximum interval | 24 hours | Cron jobs running less frequently than daily should use external scheduling |
+
+Sub-minute schedules (e.g. 6-field expressions with seconds like `*/30 * * * * *`) are rejected at registration time with a clear error.
+
+### Overlap Prevention
+
+Each job tracks a `running` flag. If a previous invocation is still in-flight when the next tick fires, the job is skipped. This prevents slow handlers from stacking up.
+
+### Cron Secret
+
+When cron jobs are configured, orkify generates a random secret per process and:
+
+1. Sets `ORKIFY_CRON_SECRET` in the child process environment
+2. Sends it as `Authorization: Bearer <secret>` on every cron request
+
+Your route should validate the header to ensure only the daemon can trigger it:
+
+```ts
+export async function GET(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  if (authHeader !== `Bearer ${process.env.ORKIFY_CRON_SECRET}`) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+  // ... handle cron job
+}
+```
+
+The secret is regenerated on every process spawn — no config needed. You can also check `process.env.ORKIFY_CRON_SECRET` to detect whether orkify cron is active (e.g. to skip internal timers).
+
+### Persistence and Recovery
+
+Cron jobs are part of the process config and persisted in snapshots. They survive:
+
+- **`orkify snap` / `orkify restore`** — cron config is saved and restored with the snapshot
+- **`orkify daemon-reload`** — the daemon captures running configs (including cron), starts a new daemon, and restores them
+- **Daemon crash** — crash recovery spawns a new daemon and restores all process configs including cron jobs
+
+In all cases, cron jobs are re-registered automatically when the process is restored. The first tick after recovery evaluates the cron expression from the current time, so no "catch-up" runs are fired for ticks missed while the daemon was down.
+
+### Edge Cases
+
+| Scenario                             | Behavior                                                                    |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| Process has no detected port         | Job logs "no port detected, skipping" and advances to next run              |
+| Process is stopped (`orkify down`)   | Cron jobs are unregistered immediately                                      |
+| Process is deleted (`orkify delete`) | Cron jobs are unregistered immediately                                      |
+| HTTP request fails or times out      | Error is logged, job advances to next run                                   |
+| Daemon crashes mid-tick              | Crash recovery restores all configs; in-flight requests are lost (no retry) |
+| Invalid cron expression              | Rejected at registration with an error message                              |
+| Deploy reconcile                     | New cron config from `orkify.yml` is registered after reconcile completes   |
 
 ## MCP Integration
 

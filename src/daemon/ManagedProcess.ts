@@ -1,5 +1,6 @@
 import { type FSWatcher, watch } from 'chokidar';
 import { type ChildProcess, fork } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -65,6 +66,7 @@ export class ManagedProcess extends EventEmitter {
   private forkReady = false;
   private forkLaunchTimer: NodeJS.Timeout | null = null;
   private detectedPort: number | undefined;
+  readonly cronSecret: string | undefined;
   private primaryRestarts = 0;
   private lastMemoryRestart = 0;
   private workerMemoryCooldowns = new Map<number, number>();
@@ -85,6 +87,9 @@ export class ManagedProcess extends EventEmitter {
     super();
     this.id = id;
     this.config = config;
+    if (config.cron?.length) {
+      this.cronSecret = randomBytes(32).toString('hex');
+    }
     this.setupLogStreams();
   }
 
@@ -143,6 +148,9 @@ export class ManagedProcess extends EventEmitter {
     }
     if (this.config.port !== undefined) {
       env.ORKIFY_PORT = String(this.config.port);
+    }
+    if (this.cronSecret) {
+      env.ORKIFY_CRON_SECRET = this.cronSecret;
     }
 
     // Prepend --import for the metrics probe so it runs inside the child
@@ -224,6 +232,27 @@ export class ManagedProcess extends EventEmitter {
           workerId: 0,
           error: msg.data as Record<string, unknown>,
         });
+        return;
+      }
+
+      // Port auto-detection from the metrics probe's net.Server.listen hook
+      if (msg?.__orkify && msg.type === 'listening' && msg.data) {
+        const port = (msg.data as { port?: number }).port;
+        if (port && !this.detectedPort) {
+          this.detectedPort = port;
+        }
+        if (!this.forkReady) {
+          this.forkReady = true;
+          this.clearForkLaunchTimer();
+          const effectivePort = this.config.port ?? this.detectedPort;
+          if (this.config.healthCheck && effectivePort) {
+            this.checkHealth(effectivePort, this.config.healthCheck)
+              .then(() => this.emit('worker:ready', 0))
+              .catch((err) => this.emit('worker:error', { workerId: 0, error: err }));
+          } else {
+            this.emit('worker:ready', 0);
+          }
+        }
         return;
       }
 
@@ -317,6 +346,9 @@ export class ManagedProcess extends EventEmitter {
     }
     if (this.config.port !== undefined) {
       env.ORKIFY_PORT = String(this.config.port);
+    }
+    if (this.cronSecret) {
+      env.ORKIFY_CRON_SECRET = this.cronSecret;
     }
 
     // Spawn the cluster wrapper as the primary

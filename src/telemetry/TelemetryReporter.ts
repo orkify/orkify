@@ -1,8 +1,12 @@
 import { EventEmitter } from 'node:events';
 import { arch, cpus, hostname, platform, totalmem } from 'node:os';
+import type { AlertEvaluator } from '../alerts/AlertEvaluator.js';
+import type { ConfigStore } from '../config/ConfigStore.js';
 import type { Orchestrator } from '../daemon/Orchestrator.js';
 import type {
   DeployStatus,
+  ProjectConfig,
+  TelemetryAlertEvent,
   TelemetryConfig,
   TelemetryErrorEvent,
   TelemetryEvent,
@@ -35,11 +39,21 @@ export class TelemetryReporter extends EventEmitter {
   private hostName: string;
   private hostInfo: TelemetryHostInfo;
   private _deployStatus: DeployStatus | null = null;
+  private configStore: ConfigStore | null;
+  private alertEvaluator: AlertEvaluator | null;
+  private mcpCapable = false;
 
-  constructor(config: TelemetryConfig, orchestrator: Orchestrator) {
+  constructor(
+    config: TelemetryConfig,
+    orchestrator: Orchestrator,
+    configStore?: ConfigStore | null,
+    alertEvaluator?: AlertEvaluator | null
+  ) {
     super();
     this.config = config;
     this.orchestrator = orchestrator;
+    this.configStore = configStore ?? null;
+    this.alertEvaluator = alertEvaluator ?? null;
     this.hostName = hostname();
     this.hostInfo = {
       os: platform(),
@@ -261,6 +275,10 @@ export class TelemetryReporter extends EventEmitter {
     this._deployStatus = status;
   }
 
+  setMcpCapable(v: boolean): void {
+    this.mcpCapable = v;
+  }
+
   private async collectAndFlush(): Promise<void> {
     // Collect metrics snapshot
     const processList = this.orchestrator.list();
@@ -302,11 +320,15 @@ export class TelemetryReporter extends EventEmitter {
     this.metrics = [];
     this.errors = [];
 
+    // Drain alert events before the emptiness check
+    const alertsToSend = this.alertEvaluator?.drainAlerts() ?? [];
+
     if (
       eventsToSend.length === 0 &&
       metricsToSend.length === 0 &&
       errorsToSend.length === 0 &&
-      logsToSend.length === 0
+      logsToSend.length === 0 &&
+      alertsToSend.length === 0
     ) {
       return;
     }
@@ -323,6 +345,22 @@ export class TelemetryReporter extends EventEmitter {
       logs: logsToSend,
       sentAt: Date.now(),
     };
+
+    // Include config hash for sync
+    const configHash = this.configStore?.getHash();
+    if (configHash !== undefined) {
+      payload.configHash = configHash;
+    }
+
+    // Include MCP capability flag
+    if (this.mcpCapable) {
+      payload.mcpCapable = true;
+    }
+
+    // Include alert events
+    if (alertsToSend.length > 0) {
+      payload.alerts = alertsToSend;
+    }
 
     // Include deploy status if active
     if (this._deployStatus) {
@@ -347,13 +385,21 @@ export class TelemetryReporter extends EventEmitter {
       if (!response.ok) {
         const body = await response.text().catch(() => '');
         console.error(`Telemetry flush failed: ${response.status} ${response.statusText} ${body}`);
-        this.restoreBuffers(eventsToSend, metricsToSend, errorsToSend, logsToSend);
+        this.restoreBuffers(eventsToSend, metricsToSend, errorsToSend, logsToSend, alertsToSend);
       } else {
-        // Parse response for pending commands
+        // Parse response for pending commands and config sync
         try {
-          const responseBody = (await response.json()) as { has_commands?: boolean };
+          const responseBody = (await response.json()) as {
+            ok?: boolean;
+            has_commands?: boolean;
+            config_hash?: string;
+            config?: ProjectConfig;
+          };
           if (responseBody.has_commands) {
             this.emit('commands:pending');
+          }
+          if (responseBody.config && responseBody.config_hash) {
+            this.configStore?.update(responseBody.config, responseBody.config_hash);
           }
         } catch {
           // Ignore JSON parse errors on response
@@ -361,7 +407,7 @@ export class TelemetryReporter extends EventEmitter {
       }
     } catch (err) {
       console.error('Telemetry flush error:', err instanceof Error ? err.message : err);
-      this.restoreBuffers(eventsToSend, metricsToSend, errorsToSend, logsToSend);
+      this.restoreBuffers(eventsToSend, metricsToSend, errorsToSend, logsToSend, alertsToSend);
     }
   }
 
@@ -428,7 +474,8 @@ export class TelemetryReporter extends EventEmitter {
     events: TelemetryEvent[],
     metrics: TelemetryMetricsSnapshot[],
     errors: TelemetryErrorEvent[],
-    logs: TelemetryLogEntry[]
+    logs: TelemetryLogEntry[],
+    alerts?: TelemetryAlertEvent[]
   ): void {
     const maxSize = TELEMETRY_MAX_BATCH_SIZE * 2;
     this.events = [...events, ...this.events].slice(-maxSize);
@@ -436,5 +483,9 @@ export class TelemetryReporter extends EventEmitter {
     this.errors = [...errors, ...this.errors].slice(-maxSize);
     // Restore logs back to flush buffer (prepend so they'll be sent first next time)
     this.logFlushBuffer = [...logs, ...this.logFlushBuffer].slice(-maxSize);
+    // Re-queue unsent alerts back into the evaluator's buffer
+    if (alerts && alerts.length > 0 && this.alertEvaluator) {
+      this.alertEvaluator.restoreAlerts(alerts);
+    }
   }
 }

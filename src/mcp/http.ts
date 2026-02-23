@@ -1,9 +1,16 @@
+import type { OAuthTokenVerifier } from '@modelcontextprotocol/sdk/server/auth/provider.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { findKeyByName, isIpAllowed, LocalConfigVerifier, startConfigWatcher } from './auth.js';
+import {
+  findKeyByName,
+  isIpAllowed,
+  LocalConfigVerifier,
+  type RemoteConfigVerifier,
+  startConfigWatcher,
+} from './auth.js';
 import { createMcpServer } from './server.js';
 
 export interface HttpOptions {
@@ -13,6 +20,8 @@ export interface HttpOptions {
   cors?: string;
   /** Skip registering SIGTERM/SIGINT handlers (used when running inside the daemon). */
   skipSignalHandlers?: boolean;
+  /** Custom token verifier — when provided, skips LocalConfigVerifier and local config watcher. */
+  tokenVerifier?: OAuthTokenVerifier;
 }
 
 export interface McpHttpServer {
@@ -28,9 +37,12 @@ const SESSION_TTL_MS = 30 * 60 * 1000;
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 
 export async function startMcpHttpServer(options: HttpOptions): Promise<McpHttpServer> {
-  startConfigWatcher();
-
-  const verifier = new LocalConfigVerifier();
+  const verifier =
+    options.tokenVerifier ??
+    (() => {
+      startConfigWatcher();
+      return new LocalConfigVerifier();
+    })();
   const app = express();
   app.use(express.json());
 
@@ -76,6 +88,7 @@ export async function startMcpHttpServer(options: HttpOptions): Promise<McpHttpS
   app.use('/mcp', requireBearerAuth({ verifier }));
 
   // IP allowlist middleware — runs after auth, before route handlers
+  const isRemoteVerifier = 'getAllowedIpsForToken' in verifier;
   app.use('/mcp', (req, res, next) => {
     // Skip for OPTIONS (no auth on preflights — they're handled by CORS above)
     if (req.method === 'OPTIONS') {
@@ -83,14 +96,30 @@ export async function startMcpHttpServer(options: HttpOptions): Promise<McpHttpS
       return;
     }
 
-    const clientId = req.auth?.clientId;
-    if (clientId) {
-      const key = findKeyByName(clientId);
-      if (key?.allowedIps && key.allowedIps.length > 0) {
-        const clientIp = req.ip || req.socket.remoteAddress || '';
-        if (!isIpAllowed(clientIp, key.allowedIps)) {
-          res.status(403).json({ error: 'IP address not allowed for this key' });
-          return;
+    if (isRemoteVerifier) {
+      // Remote verifier: look up allowed IPs by token hash
+      const token = req.auth?.token;
+      if (token) {
+        const allowedIps = (verifier as RemoteConfigVerifier).getAllowedIpsForToken(token);
+        if (allowedIps && allowedIps.length > 0) {
+          const clientIp = req.ip || req.socket.remoteAddress || '';
+          if (!isIpAllowed(clientIp, allowedIps)) {
+            res.status(403).json({ error: 'IP address not allowed for this key' });
+            return;
+          }
+        }
+      }
+    } else {
+      // Local verifier: look up allowed IPs by key name from YAML config
+      const clientId = req.auth?.clientId;
+      if (clientId) {
+        const key = findKeyByName(clientId);
+        if (key?.allowedIps && key.allowedIps.length > 0) {
+          const clientIp = req.ip || req.socket.remoteAddress || '';
+          if (!isIpAllowed(clientIp, key.allowedIps)) {
+            res.status(403).json({ error: 'IP address not allowed for this key' });
+            return;
+          }
         }
       }
     }

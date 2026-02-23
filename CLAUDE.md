@@ -179,17 +179,18 @@ npm run build
 
 ## Environment Variables Set for Managed Processes
 
-| Variable              | Description                 |
-| --------------------- | --------------------------- |
-| `ORKIFY_PROCESS_ID`   | Process ID in ORKIFY        |
-| `ORKIFY_PROCESS_NAME` | Process name                |
-| `ORKIFY_WORKER_ID`    | Worker ID (0 for fork mode) |
-| `ORKIFY_CLUSTER_MODE` | "true" if cluster mode      |
-| `ORKIFY_WORKERS`      | Number of workers           |
+| Variable              | Description                           |
+| --------------------- | ------------------------------------- |
+| `ORKIFY_PROCESS_ID`   | Process ID in ORKIFY                  |
+| `ORKIFY_PROCESS_NAME` | Process name                          |
+| `ORKIFY_WORKER_ID`    | Worker ID (0 for fork mode)           |
+| `ORKIFY_CLUSTER_MODE` | "true" if cluster mode                |
+| `ORKIFY_WORKERS`      | Number of workers                     |
+| `ORKIFY_CRON_SECRET`  | Cron auth secret (if cron configured) |
 
 ## Signaling Ready
 
-orkify auto-detects when cluster workers start listening on a port — no boilerplate needed. For apps that don't bind a port (background workers, queue consumers), signal manually:
+orkify auto-detects when processes start listening on a port — no boilerplate needed. In cluster mode this uses Node's built-in `worker:listening` event; in fork mode the metrics probe hooks `net.Server.listen` and reports the port via IPC. For apps that don't bind a port (background workers, queue consumers), signal manually:
 
 ```javascript
 if (process.send) {

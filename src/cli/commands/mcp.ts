@@ -16,6 +16,7 @@ import { startMcpServer } from '../../mcp/server.js';
 export const mcpCommand = new Command('mcp')
   .description('Start MCP server for AI tool integration (e.g., Claude Code)')
   .addOption(new Option('--simple-http', 'Use HTTP transport with local key auth'))
+  .addOption(new Option('--advanced-http', 'Use HTTP transport with remote dashboard-managed keys'))
   .addOption(new Option('--port <port>', 'HTTP port').default(MCP_DEFAULT_PORT).argParser(Number))
   .addOption(new Option('--bind <address>', 'HTTP bind address').default('127.0.0.1'))
   .addOption(
@@ -26,11 +27,18 @@ export const mcpCommand = new Command('mcp')
   )
   .action(async (opts) => {
     try {
-      if (opts.simpleHttp) {
-        warnIfConfigInsecure();
+      if (opts.simpleHttp && opts.advancedHttp) {
+        console.error(chalk.red('✗ --simple-http and --advanced-http are mutually exclusive'));
+        process.exit(1);
+      }
+
+      if (opts.simpleHttp || opts.advancedHttp) {
+        const transport = opts.advancedHttp ? 'advanced-http' : 'simple-http';
+        if (opts.simpleHttp) warnIfConfigInsecure();
+
         // Delegate to daemon via IPC
         const payload = {
-          transport: 'simple-http' as const,
+          transport: transport as 'advanced-http' | 'simple-http',
           port: opts.port,
           bind: opts.bind,
           cors: opts.cors,
@@ -47,8 +55,15 @@ export const mcpCommand = new Command('mcp')
           reason?: string;
           port: number;
           bind: string;
+          waitingForConfig?: boolean;
         };
-        if (data.started) {
+        if (data.waitingForConfig) {
+          console.log(
+            chalk.green(
+              `✓ MCP advanced-http registered — server will start after first config sync`
+            )
+          );
+        } else if (data.started) {
           console.log(
             chalk.green(`✓ MCP HTTP server started on http://${data.bind}:${data.port}/mcp`)
           );

@@ -20,13 +20,17 @@ import type {
   DeploySettings,
   KillPayload,
   LogsPayload,
+  McpRemoteConfig,
   McpStartPayload,
   ProcessConfig,
+  ProjectConfig,
   RestorePayload,
   SnapPayload,
   TargetPayload,
   UpPayload,
 } from '../types/index.js';
+import { AlertEvaluator } from '../alerts/AlertEvaluator.js';
+import { ConfigStore } from '../config/ConfigStore.js';
 import {
   DAEMON_PID_FILE,
   IPCMessageType,
@@ -36,11 +40,13 @@ import {
   SOCKET_PATH,
   TELEMETRY_DEFAULT_API_HOST,
 } from '../constants.js';
+import { CronScheduler } from '../cron/CronScheduler.js';
 import { CommandPoller } from '../deploy/CommandPoller.js';
 import { getOrkifyConfig } from '../deploy/config.js';
 import { DeployExecutor } from '../deploy/DeployExecutor.js';
 import { type ClientConnection, DaemonServer } from '../ipc/DaemonServer.js';
 import { createResponse } from '../ipc/protocol.js';
+import { RemoteConfigVerifier } from '../mcp/auth.js';
 import { type McpHttpServer, startMcpHttpServer } from '../mcp/http.js';
 import { TelemetryReporter } from '../telemetry/TelemetryReporter.js';
 import { Orchestrator } from './Orchestrator.js';
@@ -54,6 +60,7 @@ export interface DaemonOptions {
 
 export interface DaemonContext {
   orchestrator: Orchestrator;
+  cronScheduler: CronScheduler;
   server: DaemonServer;
   telemetry: null | TelemetryReporter;
   startMcpHttp: (opts: McpStartPayload) => Promise<void>;
@@ -192,14 +199,18 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
   const pidLockFd = acquirePidLock();
 
   const orchestrator = new Orchestrator();
+  const cronScheduler = new CronScheduler(orchestrator);
   const server = new DaemonServer();
+
+  const configStore = new ConfigStore();
+  const alertEvaluator = new AlertEvaluator(configStore);
 
   let telemetry: null | TelemetryReporter = null;
   const apiKey = process.env.ORKIFY_API_KEY;
   if (apiKey) {
     const apiHost = process.env.ORKIFY_API_HOST || TELEMETRY_DEFAULT_API_HOST;
     const config = { apiKey, apiHost };
-    telemetry = new TelemetryReporter(config, orchestrator);
+    telemetry = new TelemetryReporter(config, orchestrator, configStore, alertEvaluator);
     telemetry.start();
 
     const poller = new CommandPoller(config, orchestrator, telemetry);
@@ -210,6 +221,40 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
     console.log('Telemetry disabled (no ORKIFY_API_KEY)');
   }
 
+  // Evaluate alert rules every second
+  const alertInterval = setInterval(() => {
+    const processList = orchestrator.list();
+    const now = Date.now();
+    alertEvaluator.evaluate(
+      processList.map((p) => ({
+        processName: p.name,
+        processId: p.id,
+        execMode: p.execMode,
+        status: p.status,
+        workers: p.workers.map((w) => ({
+          id: w.id,
+          pid: w.pid,
+          cpu: w.cpu,
+          memory: w.memory,
+          uptime: w.uptime,
+          restarts: w.restarts,
+          crashes: w.crashes,
+          status: w.status,
+          stale: w.stale,
+          heapUsed: w.heapUsed,
+          heapTotal: w.heapTotal,
+          external: w.external,
+          arrayBuffers: w.arrayBuffers,
+          eventLoopLag: w.eventLoopLag,
+          eventLoopLagP95: w.eventLoopLagP95,
+          activeHandles: w.activeHandles,
+        })),
+        timestamp: now,
+      }))
+    );
+  }, 1000);
+  alertInterval.unref();
+
   // MCP HTTP server state
   let mcpServer: McpHttpServer | null = null;
   let mcpOptions: McpStartPayload | null = null;
@@ -217,6 +262,11 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
   // Forward logs to connected clients
   orchestrator.on('log', (data) => {
     server.broadcastLog(data.processName, data);
+  });
+
+  // Unregister cron jobs when a process is stopped or deleted
+  orchestrator.on('process:stop', ({ processName }: { processName: string }) => {
+    cronScheduler.unregister(processName);
   });
 
   // Register handlers
@@ -236,6 +286,11 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
 
     const payload = request.payload as UpPayload;
     const info = await orchestrator.up(payload);
+
+    if (payload.cron?.length) {
+      cronScheduler.register(payload.name ?? info.name, payload.cron);
+    }
+
     return createResponse(request.id, true, info);
   });
 
@@ -260,6 +315,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
   server.registerHandler(IPCMessageType.DELETE, async (request) => {
     const payload = request.payload as TargetPayload;
     const results = await orchestrator.delete(payload.target);
+    for (const info of results) {
+      cronScheduler.unregister(info.name);
+    }
     return createResponse(request.id, true, results);
   });
 
@@ -295,7 +353,14 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
 
   server.registerHandler(IPCMessageType.RESTORE, async (request) => {
     const payload = request.payload as RestorePayload | undefined;
-    const { processes, mcpState } = await orchestrator.restoreFromSnapshot(payload?.file);
+    const { processes, configs, mcpState } = await orchestrator.restoreFromSnapshot(payload?.file);
+
+    // Re-register cron jobs from restored configs
+    for (const config of configs) {
+      if (config.cron?.length) {
+        cronScheduler.register(config.name, config.cron);
+      }
+    }
 
     // Restore MCP HTTP server if it was running when snapshot was taken
     if (mcpState && !mcpServer) {
@@ -318,6 +383,14 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
   server.registerHandler(IPCMessageType.RESTORE_CONFIGS, async (request) => {
     const configs = request.payload as ProcessConfig[];
     const results = await orchestrator.restoreFromMemory(configs);
+
+    // Re-register cron jobs from restored configs
+    for (const config of configs) {
+      if (config.cron?.length) {
+        cronScheduler.register(config.name, config.cron);
+      }
+    }
+
     return createResponse(request.id, true, results);
   });
 
@@ -403,6 +476,14 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
         cwd: currentLink,
       }));
       const result = await orchestrator.reconcile(configs, p.secrets);
+
+      // Register cron jobs for started/restarted processes
+      for (const config of configs) {
+        if (config.cron?.length) {
+          cronScheduler.register(config.name, config.cron);
+        }
+      }
+
       return createResponse(request.id, true, result);
     }
   });
@@ -420,8 +501,13 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
     }
 
     const config = { apiKey: payload.apiKey, apiHost: payload.apiHost };
-    telemetry = new TelemetryReporter(config, orchestrator);
+    telemetry = new TelemetryReporter(config, orchestrator, configStore, alertEvaluator);
     telemetry.start();
+
+    // If MCP advanced-http is pending, mark capability
+    if (mcpOptions?.transport === 'advanced-http') {
+      telemetry.setMcpCapable(true);
+    }
 
     const poller = new CommandPoller(config, orchestrator, telemetry);
     poller.start();
@@ -489,13 +575,26 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
     const payload = request.payload as McpStartPayload;
 
     // Validate transport type
-    if (payload.transport !== 'simple-http') {
+    if (payload.transport !== 'simple-http' && payload.transport !== 'advanced-http') {
       return createResponse(
         request.id,
         false,
         undefined,
         `Unknown MCP transport: "${payload.transport}"`
       );
+    }
+
+    // advanced-http: don't start server immediately — wait for config sync
+    if (payload.transport === 'advanced-http') {
+      mcpOptions = payload;
+      telemetry?.setMcpCapable(true);
+      console.log('MCP advanced-http registered — server will start after first config sync');
+      return createResponse(request.id, true, {
+        started: false,
+        waitingForConfig: true,
+        port: payload.port,
+        bind: payload.bind,
+      });
     }
 
     // Already running with same options → idempotent success
@@ -599,6 +698,32 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
     return createResponse(request.id, true, { crashing: true });
   });
 
+  // Config-driven MCP lifecycle: start/stop MCP server based on remote config
+  configStore.on('config:updated', async (config: ProjectConfig, _prevMcp?: McpRemoteConfig) => {
+    const mcpConfig = config.mcp;
+    if (mcpConfig.enabled && !mcpServer && mcpOptions?.transport === 'advanced-http') {
+      try {
+        mcpServer = await startMcpHttpServer({
+          port: mcpOptions.port,
+          bind: mcpOptions.bind,
+          cors: mcpOptions.cors,
+          skipSignalHandlers: true,
+          tokenVerifier: new RemoteConfigVerifier(configStore),
+        });
+        console.log(
+          `MCP advanced-http server started on http://${mcpOptions.bind}:${mcpOptions.port}/mcp`
+        );
+      } catch (err) {
+        console.error('Failed to start MCP advanced-http server:', (err as Error).message);
+      }
+    } else if (!mcpConfig.enabled && mcpServer && mcpOptions?.transport === 'advanced-http') {
+      await mcpServer.shutdown();
+      mcpServer = null;
+      console.log('MCP advanced-http server stopped (disabled via config)');
+    }
+    // If keys changed while running: no restart needed, verifier reads from ConfigStore live
+  });
+
   // Release PID lock and clean up socket
   function cleanup() {
     try {
@@ -627,6 +752,8 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
     isShuttingDown = true;
 
     try {
+      clearInterval(alertInterval);
+      cronScheduler.shutdown();
       // Shut down MCP HTTP server first (before closing the IPC server)
       if (mcpServer) {
         await mcpServer.shutdown().catch((err) => {
@@ -667,6 +794,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
 
   return {
     orchestrator,
+    cronScheduler,
     server,
     telemetry,
     startMcpHttp: startMcpHttpFromPayload,

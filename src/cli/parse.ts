@@ -1,5 +1,8 @@
+import chalk from 'chalk';
 import { cpus } from 'node:os';
+import type { CronJob } from '../types/index.js';
 import { DEFAULT_LOG_MAX_SIZE, MIN_LOG_MAX_SIZE } from '../constants.js';
+import { validateCronPath, validateCronSchedule } from '../cron/CronScheduler.js';
 
 /**
  * Core byte parser. Supports: 100M, 500K, 1G, 1.5G, or raw byte count.
@@ -59,6 +62,37 @@ export function parseWorkers(value: string): number {
   if (num === 0) return cpus().length;
   if (num < 0) return Math.max(1, cpus().length + num);
   return num;
+}
+
+/**
+ * Parse --cron spec strings into CronJob objects.
+ * Each spec is "schedule path" where schedule is a 5-part cron expression
+ * and path is the last whitespace-separated token.
+ * Exits process on validation failure.
+ */
+export function parseCronSpecs(specs: string[]): CronJob[] {
+  const cronJobs: CronJob[] = [];
+  for (const spec of specs) {
+    const tokens = spec.trim().split(/\s+/);
+    if (tokens.length < 6) {
+      console.error(chalk.red(`✗ Invalid --cron spec: "${spec}" (need 5-part schedule + path)`));
+      process.exit(1);
+    }
+    const path = tokens[tokens.length - 1];
+    const schedule = tokens.slice(0, -1).join(' ');
+    const pathError = validateCronPath(path);
+    if (pathError) {
+      console.error(chalk.red(`✗ Invalid --cron: ${pathError}`));
+      process.exit(1);
+    }
+    const scheduleError = validateCronSchedule(schedule);
+    if (scheduleError) {
+      console.error(chalk.red(`✗ Invalid --cron: ${scheduleError}`));
+      process.exit(1);
+    }
+    cronJobs.push({ schedule, path });
+  }
+  return cronJobs;
 }
 
 export function sleep(ms: number): Promise<void> {

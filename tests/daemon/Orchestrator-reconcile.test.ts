@@ -165,4 +165,80 @@ describe('Orchestrator.reconcile', () => {
       await orkify.shutdown();
     }
   }, 15000);
+
+  it('detects cron config change', async () => {
+    const orkify = new Orchestrator();
+
+    try {
+      await orkify.up({
+        script: scriptPath,
+        name: 'api',
+        workers: 1,
+        cwd: tempDir,
+        cron: [{ schedule: '*/5 * * * *', path: '/api/cron/check' }],
+      });
+      await new Promise((r) => setTimeout(r, 500));
+
+      const result = await orkify.reconcile([
+        makeConfig('api', { cron: [{ schedule: '*/10 * * * *', path: '/api/cron/check' }] }),
+      ]);
+
+      expect(result.started).toEqual(['api']);
+    } finally {
+      await orkify.shutdown();
+    }
+  }, 15000);
+
+  it('treats identical cron as unchanged', async () => {
+    const orkify = new Orchestrator();
+
+    try {
+      const cron = [{ schedule: '*/5 * * * *', path: '/api/cron/check' }];
+      await orkify.up({ script: scriptPath, name: 'api', workers: 1, cwd: tempDir, cron });
+      await new Promise((r) => setTimeout(r, 500));
+
+      const result = await orkify.reconcile([makeConfig('api', { cron })]);
+
+      expect(result.reloaded).toEqual(['api']);
+    } finally {
+      await orkify.shutdown();
+    }
+  }, 15000);
+
+  it('detects cron added where none existed', async () => {
+    const orkify = new Orchestrator();
+
+    try {
+      await orkify.up({ script: scriptPath, name: 'api', workers: 1, cwd: tempDir });
+      await new Promise((r) => setTimeout(r, 500));
+
+      const result = await orkify.reconcile([
+        makeConfig('api', { cron: [{ schedule: '*/5 * * * *', path: '/health' }] }),
+      ]);
+
+      expect(result.started).toEqual(['api']);
+    } finally {
+      await orkify.shutdown();
+    }
+  }, 15000);
+
+  it('detects extra cron job added', async () => {
+    const orkify = new Orchestrator();
+
+    try {
+      const cron = [{ schedule: '*/5 * * * *', path: '/api/cron/check' }];
+      await orkify.up({ script: scriptPath, name: 'api', workers: 1, cwd: tempDir, cron });
+      await new Promise((r) => setTimeout(r, 500));
+
+      const result = await orkify.reconcile([
+        makeConfig('api', {
+          cron: [...cron, { schedule: '0 * * * *', path: '/api/cron/hourly' }],
+        }),
+      ]);
+
+      expect(result.started).toEqual(['api']);
+    } finally {
+      await orkify.shutdown();
+    }
+  }, 15000);
 });

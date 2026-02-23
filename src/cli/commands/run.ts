@@ -9,7 +9,7 @@ import {
   MCP_DEFAULT_PORT,
 } from '../../constants.js';
 import { type DaemonContext, startDaemon } from '../../daemon/startDaemon.js';
-import { parseLogSize, parseMemorySize, parseWorkers } from '../parse.js';
+import { parseCronSpecs, parseLogSize, parseMemorySize, parseWorkers } from '../parse.js';
 
 /**
  * Run command - runs process in foreground with full daemon features
@@ -51,6 +51,10 @@ export const runCommand = new Command('run')
   )
   .option('--restart-on-mem <size>', 'Restart when RSS exceeds threshold (e.g. 512M, 1G)')
   .option('--restart-on-memory <size>', 'Alias for --restart-on-mem')
+  .option(
+    '--cron <spec...>',
+    'Cron job: "schedule path" (repeatable, e.g. "*/2 * * * * /api/cron/heartbeat-check")'
+  )
   .option('--mcp-simple-http', 'Start MCP HTTP server (local key auth)')
   .option('--mcp-port <port>', 'MCP HTTP port', String(MCP_DEFAULT_PORT))
   .option('--mcp-bind <address>', 'MCP bind address', '127.0.0.1')
@@ -117,6 +121,9 @@ export const runCommand = new Command('run')
       }
     }
 
+    // Parse --cron specs
+    const cronJobs = options.cron ? parseCronSpecs(options.cron as string[]) : [];
+
     // Build UpPayload and start the process via orchestrator
     const restartOnMemRaw = options.restartOnMem || options.restartOnMemory;
 
@@ -142,6 +149,7 @@ export const runCommand = new Command('run')
       logMaxFiles: parseInt(options.logMaxFiles, 10),
       logMaxAge: parseInt(options.logMaxAge, 10) * 24 * 60 * 60 * 1000,
       restartOnMemory: restartOnMemRaw ? parseMemorySize(restartOnMemRaw) : undefined,
+      cron: cronJobs.length > 0 ? cronJobs : undefined,
     };
 
     let info: ProcessInfo;
@@ -151,6 +159,11 @@ export const runCommand = new Command('run')
       console.error(chalk.red(`✗ Failed to start process: ${(err as Error).message}`));
       await ctx.gracefulShutdown();
       process.exit(1);
+    }
+
+    // Register cron jobs with the scheduler
+    if (payload.cron?.length) {
+      ctx.cronScheduler.register(info.name, payload.cron);
     }
 
     if (!silent) {

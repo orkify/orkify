@@ -1,12 +1,13 @@
 import type { OAuthTokenVerifier } from '@modelcontextprotocol/sdk/server/auth/provider.js';
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync, watchFile, writeFileSync } from 'node:fs';
 import { BlockList, isIPv4 } from 'node:net';
 import { dirname } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
+import type { ConfigStore } from '../config/ConfigStore.js';
 import { MCP_CONFIG_FILE, MCP_TOKEN_PREFIX } from '../constants.js';
 
 /**
@@ -121,6 +122,44 @@ export class LocalConfigVerifier implements OAuthTokenVerifier {
     }
 
     throw new InvalidTokenError('Invalid or unknown token');
+  }
+}
+
+/**
+ * Token verifier that reads keys from the remote ProjectConfig via ConfigStore.
+ * Matches tokens by SHA-256 hash (the dashboard stores hashes, not raw tokens).
+ */
+export class RemoteConfigVerifier implements OAuthTokenVerifier {
+  constructor(private configStore: ConfigStore) {}
+
+  async verifyAccessToken(token: string): Promise<AuthInfo> {
+    const hash = createHash('sha256').update(token).digest('hex');
+    const hashBuf = Buffer.from(hash);
+    const mcpConfig = this.configStore.getMcpConfig();
+
+    for (const key of mcpConfig.keys) {
+      const keyBuf = Buffer.from(key.key_hash);
+      if (hashBuf.length === keyBuf.length && timingSafeEqual(hashBuf, keyBuf)) {
+        return {
+          token,
+          clientId: key.name,
+          scopes: key.tools,
+          expiresAt: Math.floor(Date.now() / 1000) + 365 * 24 * 3600,
+        };
+      }
+    }
+    throw new InvalidTokenError('Invalid or unknown token');
+  }
+
+  getAllowedIpsForToken(token: string): string[] | undefined {
+    const hash = createHash('sha256').update(token).digest('hex');
+    const mcpConfig = this.configStore.getMcpConfig();
+    for (const key of mcpConfig.keys) {
+      if (hash === key.key_hash) {
+        return key.allowed_ips.length > 0 ? key.allowed_ips : undefined;
+      }
+    }
+    return undefined;
   }
 }
 

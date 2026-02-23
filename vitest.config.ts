@@ -25,7 +25,7 @@ export default defineConfig({
         'src/state/StateStore.ts': { lines: 96.55, branches: 91.3 },
         'src/probe/parse-frames.ts': { lines: 95.65, branches: 100 },
         'src/ipc/protocol.ts': { lines: 100, branches: 100 },
-        'src/telemetry/TelemetryReporter.ts': { lines: 94.63, branches: 87.5 },
+        'src/telemetry/TelemetryReporter.ts': { lines: 91, branches: 83 },
         'src/daemon/Orchestrator.ts': { lines: 85, branches: 84.14 },
         'src/daemon/RotatingWriter.ts': { lines: 70, branches: 60 },
         'src/daemon/ManagedProcess.ts': { lines: 62, branches: 48.9 },

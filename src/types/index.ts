@@ -1,5 +1,12 @@
 import type { ExecModeType, IPCMessageTypeType, ProcessStatusType } from '../constants.js';
 
+export interface CronJob {
+  schedule: string; // cron expression, e.g. "*/2 * * * *"
+  path: string; // HTTP path, e.g. "/api/cron/heartbeat-check"
+  method?: string; // default "GET"
+  timeout?: number; // ms, default 30000
+}
+
 export interface ProcessConfig {
   name: string;
   script: string;
@@ -23,6 +30,7 @@ export interface ProcessConfig {
   logMaxFiles: number;
   logMaxAge: number;
   restartOnMemory?: number;
+  cron?: CronJob[];
 }
 
 export interface WorkerInfo {
@@ -110,6 +118,7 @@ export interface UpPayload {
   logMaxFiles?: number;
   logMaxAge?: number;
   restartOnMemory?: number;
+  cron?: CronJob[];
 }
 
 export interface KillPayload {
@@ -152,7 +161,7 @@ export interface SavedState {
   mcp?: McpStartPayload;
 }
 
-export type McpTransport = 'simple-http';
+export type McpTransport = 'advanced-http' | 'simple-http';
 
 export interface McpStartPayload {
   transport: McpTransport;
@@ -360,6 +369,9 @@ export interface TelemetryPayload {
   metrics: TelemetryMetricsSnapshot[];
   errors: TelemetryErrorEvent[];
   logs: TelemetryLogEntry[];
+  alerts?: TelemetryAlertEvent[];
+  configHash?: null | string;
+  mcpCapable?: boolean;
   deployStatus?: DeployStatus;
   sentAt: number;
 }
@@ -367,4 +379,50 @@ export interface TelemetryPayload {
 export interface TelemetryConfig {
   apiKey: string;
   apiHost: string;
+}
+
+// Alert types
+
+export interface AlertRuleCondition {
+  metric: 'cpu' | 'heartbeat' | 'memory';
+  operator: 'gt';
+  threshold: number;
+  duration: number; // seconds of sustained violation
+}
+
+export interface AlertRuleConfig {
+  id: string;
+  name: string;
+  condition: AlertRuleCondition;
+  is_enabled: boolean;
+}
+
+export interface McpRemoteKeyConfig {
+  name: string;
+  key_hash: string;
+  tools: string[];
+  allowed_ips: string[];
+}
+
+export interface McpRemoteConfig {
+  enabled: boolean;
+  keys: McpRemoteKeyConfig[];
+}
+
+export interface ProjectConfig {
+  alert_rules: AlertRuleConfig[];
+  mcp: McpRemoteConfig;
+}
+
+export interface TelemetryAlertEvent {
+  type: 'alert:resolved' | 'alert:triggered';
+  rule_id: string;
+  rule_name: string;
+  metric: 'cpu' | 'heartbeat' | 'memory';
+  value: number;
+  threshold: number;
+  process_name: string;
+  worker_id: number;
+  hostname: string;
+  timestamp: number;
 }

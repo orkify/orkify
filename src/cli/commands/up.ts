@@ -10,7 +10,7 @@ import {
   ProcessStatus,
 } from '../../constants.js';
 import { daemonClient } from '../../ipc/DaemonClient.js';
-import { parseLogSize, parseMemorySize, parseWorkers, sleep } from '../parse.js';
+import { parseCronSpecs, parseLogSize, parseMemorySize, parseWorkers, sleep } from '../parse.js';
 import { formatProcessTable } from './list.js';
 
 function isAllOnline(processes: ProcessInfo[], name: string, expectedWorkers: number): boolean {
@@ -88,6 +88,10 @@ export const upCommand = new Command('up')
   )
   .option('--restart-on-mem <size>', 'Restart when RSS exceeds threshold (e.g. 512M, 1G)')
   .option('--restart-on-memory <size>', 'Alias for --restart-on-mem')
+  .option(
+    '--cron <spec...>',
+    'Cron job: "schedule path" (repeatable, e.g. "*/2 * * * * /api/cron/heartbeat-check")'
+  )
   .action(async (script: string, options) => {
     try {
       // Validate script path
@@ -97,6 +101,8 @@ export const upCommand = new Command('up')
       }
 
       const restartOnMemRaw = options.restartOnMem || options.restartOnMemory;
+
+      const cronJobs = options.cron ? parseCronSpecs(options.cron as string[]) : [];
 
       const payload: UpPayload = {
         script: resolve(options.cwd || process.cwd(), script),
@@ -121,6 +127,7 @@ export const upCommand = new Command('up')
         logMaxFiles: parseInt(options.logMaxFiles, 10),
         logMaxAge: parseInt(options.logMaxAge, 10) * 24 * 60 * 60 * 1000,
         restartOnMemory: restartOnMemRaw ? parseMemorySize(restartOnMemRaw) : undefined,
+        cron: cronJobs.length > 0 ? cronJobs : undefined,
       };
 
       const response = await daemonClient.request(IPCMessageType.UP, payload);

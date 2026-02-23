@@ -490,6 +490,44 @@ describe('ManagedProcess', () => {
     }, 10000);
   });
 
+  describe('cronSecret', () => {
+    it('generates a 64-char hex cronSecret when cron is configured', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          cron: [{ schedule: '*/5 * * * *', path: '/api/cron/check' }],
+        })
+      );
+
+      expect(container.cronSecret).toBeDefined();
+      expect(container.cronSecret).toHaveLength(64);
+      expect(container.cronSecret).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('does not generate cronSecret when cron is not configured', () => {
+      const container = new ManagedProcess(0, createConfig());
+      expect(container.cronSecret).toBeUndefined();
+    });
+
+    it('does not generate cronSecret when cron is empty array', () => {
+      const container = new ManagedProcess(0, createConfig({ cron: [] }));
+      expect(container.cronSecret).toBeUndefined();
+    });
+
+    it('getInfo() does not expose cronSecret', () => {
+      const container = new ManagedProcess(
+        0,
+        createConfig({
+          cron: [{ schedule: '*/5 * * * *', path: '/api/cron/check' }],
+        })
+      );
+
+      const info = container.getInfo();
+      expect(container.cronSecret).toBeDefined();
+      expect('cronSecret' in info).toBe(false);
+    });
+  });
+
   describe('cluster mode metrics-based status recovery', () => {
     function createClusterContainer() {
       const container = new ManagedProcess(
