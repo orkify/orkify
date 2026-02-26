@@ -13,6 +13,8 @@ Modern JS process orchestration and deployment for your own infrastructure.
 - [Zero-Downtime Reload](#zero-downtime-reload)
 - [Worker Readiness](#worker-readiness)
 - [Graceful Shutdown](#graceful-shutdown)
+- [Environment Variables](#environment-variables)
+- [Worker IPC (Broadcasting)](#worker-ipc-broadcasting)
 - [Socket.IO / WebSocket Support](#socketio--websocket-support)
 - [Log Rotation](#log-rotation)
 - [Environment Files](#environment-files)
@@ -254,6 +256,57 @@ process.on('SIGTERM', () => {
   });
 });
 ```
+
+## Environment Variables
+
+orkify sets these environment variables on every managed process:
+
+| Variable              | Description                                                  |
+| --------------------- | ------------------------------------------------------------ |
+| `ORKIFY_PROCESS_ID`   | Process ID in orkify                                         |
+| `ORKIFY_PROCESS_NAME` | Process name (from `-n` flag)                                |
+| `ORKIFY_WORKER_ID`    | Worker index: `0` in fork mode, `0` to `N-1` in cluster mode |
+| `ORKIFY_CLUSTER_MODE` | `"true"` in cluster mode, unset in fork mode                 |
+| `ORKIFY_WORKERS`      | Total number of workers                                      |
+| `ORKIFY_EXEC_MODE`    | `"fork"` or `"cluster"`                                      |
+
+### Detecting the Primary Worker
+
+Worker IDs are stable — `ORKIFY_WORKER_ID=0` survives crashes, restarts, and zero-downtime reloads. Use it to elect a primary worker for singletons (database connections, WebSocket clients, cron-like tasks):
+
+```javascript
+const isPrimary = !process.env.ORKIFY_WORKER_ID || process.env.ORKIFY_WORKER_ID === '0';
+
+if (isPrimary) {
+  // Only worker 0 connects to Discord, runs scheduled jobs, etc.
+  startSingletonService();
+}
+```
+
+## Worker IPC (Broadcasting)
+
+In cluster mode, workers can send messages to all other workers via the primary process. Send a message with `type: 'broadcast'` and orkify relays it to every sibling:
+
+```javascript
+// Worker 1: send a cache-invalidation signal
+process.send?.({
+  __orkify: true,
+  type: 'broadcast',
+  channel: 'cache:invalidate',
+  data: { key: 'users:123' },
+});
+
+// All other workers receive it:
+process.on('message', (msg) => {
+  if (msg?.__orkify && msg.type === 'broadcast' && msg.channel === 'cache:invalidate') {
+    cache.delete(msg.data.key);
+  }
+});
+```
+
+Messages must have `__orkify: true` and `type: 'broadcast'`. The `channel` and `data` fields are yours to define. The sending worker does **not** receive its own broadcast — only siblings do.
+
+**Request/response pattern**: To route a request to a specific worker (e.g., worker 0 for singletons), broadcast the request. Worker 0 picks it up via `isPrimary`, processes it, and broadcasts the response. Other workers ignore both messages since they don't match any pending request ID.
 
 ## Socket.IO / WebSocket Support
 
