@@ -185,15 +185,22 @@ deployCommand
   .command('pack [dir]')
   .description('Create a deploy tarball without uploading')
   .option('--output <path>', 'Output tarball path')
-  .action(async (dir: string | undefined, options: { output?: string }) => {
+  .option('--interactive', 'Force interactive config prompts')
+  .action(async (dir: string | undefined, options: { output?: string; interactive?: boolean }) => {
     try {
       const projectDir = resolve(dir ?? process.cwd());
 
+      let config = getOrkifyConfig(projectDir);
+
+      if (!config || !config.processes?.length || options.interactive) {
+        config = await interactiveConfig(projectDir);
+        saveOrkifyConfig(projectDir, config);
+        console.log(chalk.green(`✓ Deploy config saved to ${ORKIFY_CONFIG_FILE}`));
+      }
+
       if (!existsSync(join(projectDir, ORKIFY_CONFIG_FILE))) {
         console.error(
-          chalk.red(
-            `✗ ${ORKIFY_CONFIG_FILE} not found. Create one manually or run orkify deploy upload --interactive.`
-          )
+          chalk.red(`✗ ${ORKIFY_CONFIG_FILE} not found. Run with --interactive to create one.`)
         );
         process.exit(1);
       }
