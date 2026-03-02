@@ -1,12 +1,17 @@
 {
   "name": "orkify",
-  "version": "1.0.0",
+  "version": "1.0.0-beta.1",
   "description": "Modern JS process orchestration and deployment for your own infrastructure",
   "type": "module",
   "main": "dist/cli/index.js",
   "bin": {
     "orkify": "./bin/orkify"
   },
+  "files": [
+    "bin/",
+    "boot/",
+    "dist/**/*.js"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -24,6 +29,7 @@
     "knip": "knip",
     "check": "npm run typecheck && npm run lint && npm run knip && npm run format:check && npm run test:coverage",
     "audit": "npm audit --audit-level=moderate",
+    "prepack": "npm run audit && npm run check && npm run build",
     "prepare": "husky"
   },
   "lint-staged": {
@@ -45,8 +51,16 @@
     "node",
     "daemon"
   ],
-  "author": "",
+  "author": "orkify <ahoy@orkify.com>",
   "license": "Apache-2.0",
+  "homepage": "https://orkify.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orkify/orkify.git"
+  },
+  "bugs": {
+    "url": "https://github.com/orkify/orkify/issues"
+  },
   "engines": {
     "node": ">=22.18.0"
   },

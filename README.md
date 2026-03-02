@@ -1,4 +1,10 @@
-<h1><img src="assets/icon.png" alt="" width="36" align="center" /> orkify</h1>
+<h1><img src="https://raw.githubusercontent.com/orkify/orkify/main/assets/icon.png" alt="" width="36" align="center" /> orkify</h1>
+
+[![Beta](https://img.shields.io/badge/status-beta-yellow)](https://github.com/orkify/orkify)
+[![CI](https://github.com/orkify/orkify/actions/workflows/ci.yml/badge.svg)](https://github.com/orkify/orkify/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/orkify)](https://www.npmjs.com/package/orkify)
+[![Node](https://img.shields.io/node/v/orkify)](https://nodejs.org/)
+[![License](https://img.shields.io/npm/l/orkify)](https://github.com/orkify/orkify/blob/main/LICENSE)
 
 Modern JS process orchestration and deployment for your own infrastructure.
 
