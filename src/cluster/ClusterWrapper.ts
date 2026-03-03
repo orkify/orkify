@@ -93,7 +93,16 @@ function setupCluster(): void {
       if (!reloadCandidateWorkerIds.has(worker.id) && process.send) {
         process.send({ type: 'worker:online', workerId: state.id, pid: state.pid });
       }
-      // Send cache snapshot to new worker so it starts with a warm cache
+      // Send cache snapshot to new worker so it starts with a warm cache.
+      //
+      // Race condition safety: this is safe without explicit broadcast buffering
+      // because (1) sendSnapshot() is synchronous — serialize + send happen in the
+      // same event-loop tick, so no broadcast can interleave, (2) IPC is FIFO per
+      // connection, so any broadcasts sent BEFORE this point arrive at the worker
+      // first but are harmlessly overwritten by applySnapshot()'s full replace,
+      // and any broadcasts sent AFTER arrive in order on top of the snapshot.
+      // The early-listener buffer in cache/index.ts handles messages that arrive
+      // before the worker's CacheClient is created.
       if (state.worker.isConnected()) {
         cachePrimary.sendSnapshot(state.worker);
       }

@@ -3,6 +3,7 @@ import type {
   CacheBroadcastDeleteMessage,
   CacheBroadcastInvalidateTagMessage,
   CacheBroadcastSetMessage,
+  CacheBroadcastUpdateTagTimestampMessage,
   CacheConfig,
   CacheSetOptions,
   CacheSnapshotMessage,
@@ -17,6 +18,7 @@ type CacheInboundMessage =
   | CacheBroadcastDeleteMessage
   | CacheBroadcastInvalidateTagMessage
   | CacheBroadcastSetMessage
+  | CacheBroadcastUpdateTagTimestampMessage
   | CacheSnapshotMessage;
 
 export class CacheClient {
@@ -98,11 +100,24 @@ export class CacheClient {
     return this.store.stats();
   }
 
+  getTagExpiration(tags: string[]): number {
+    return this.store.getTagExpiration(tags);
+  }
+
   invalidateTag(tag: string): void {
     this.store.invalidateTag(tag);
 
     if (this.clusterMode && process.send) {
       process.send({ __orkify: true, type: 'cache:invalidate-tag', tag });
+    }
+  }
+
+  updateTagTimestamp(tag: string, timestamp?: number): void {
+    const ts = timestamp ?? Date.now();
+    this.store.applyTagTimestamp(tag, ts);
+
+    if (this.clusterMode && process.send) {
+      process.send({ __orkify: true, type: 'cache:update-tag-timestamp', tag, tagTimestamp: ts });
     }
   }
 
@@ -131,9 +146,16 @@ export class CacheClient {
         break;
       case 'cache:invalidate-tag':
         this.store.invalidateTag(message.tag);
+        this.store.applyTagTimestamp(message.tag, message.tagTimestamp);
+        break;
+      case 'cache:update-tag-timestamp':
+        this.store.applyTagTimestamp(message.tag, message.tagTimestamp);
         break;
       case 'cache:snapshot':
-        this.store.applySnapshot(message.entries);
+        this.store.applySnapshot({
+          entries: message.entries,
+          tagTimestamps: message.tagTimestamps,
+        });
         break;
     }
   }

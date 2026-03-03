@@ -332,7 +332,9 @@ cache.get<User>('user:123'); // sync local read
 cache.has('key'); // sync local check
 cache.delete('key'); // delete + broadcast
 cache.clear(); // clear + broadcast
-cache.invalidateTag('group'); // delete all tagged entries
+cache.invalidateTag('group'); // delete all tagged entries + record timestamp
+cache.getTagExpiration(['group']); // when was this tag last invalidated?
+cache.updateTagTimestamp('group'); // record timestamp without deleting entries
 cache.stats(); // { size, hits, misses, hitRate }
 ```
 
@@ -394,6 +396,30 @@ Use cases:
 - **Deployment**: Clear all cached data for a service on deploy
 
 Tags are strings. A key can have multiple tags (`tags: ['project:1', 'org:5']`), and invalidating either tag deletes the key. Tags are preserved across daemon restarts and survive `orkify reload`.
+
+#### Tag Timestamps
+
+Every `invalidateTag()` call records when the tag was last invalidated. Query it with `getTagExpiration()`:
+
+```typescript
+cache.invalidateTag('project:proj1');
+
+// Returns the most recent invalidation timestamp (epoch ms) across the given tags
+cache.getTagExpiration(['project:proj1']); // e.g. 1709510400000
+cache.getTagExpiration(['unknown-tag']); // 0 (never invalidated)
+
+// Multiple tags — returns the max timestamp
+cache.getTagExpiration(['project:proj1', 'org:5']); // highest of the two
+```
+
+Use `updateTagTimestamp()` to record a timestamp without deleting entries — useful for stale-while-revalidate patterns where entries stay alive but are marked for background refresh:
+
+```typescript
+cache.updateTagTimestamp('group'); // records Date.now()
+cache.updateTagTimestamp('group', futureTimestamp); // explicit timestamp
+```
+
+Tag timestamps sync across workers via IPC, persist across daemon restarts, and survive `orkify reload`.
 
 ### Cluster Mode Details
 

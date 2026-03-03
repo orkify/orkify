@@ -64,12 +64,28 @@ export class CachePrimary {
       }
       case 'cache:invalidate-tag': {
         this.store.invalidateTag(msg.tag);
+        const tagTimestamp = this.store.getTagExpiration([msg.tag]);
         for (const [, state] of allWorkers) {
           if (state.worker.isConnected()) {
             state.worker.send({
               __orkify: true,
               type: 'cache:invalidate-tag',
               tag: msg.tag,
+              tagTimestamp,
+            });
+          }
+        }
+        break;
+      }
+      case 'cache:update-tag-timestamp': {
+        this.store.applyTagTimestamp(msg.tag, msg.tagTimestamp);
+        for (const [, state] of allWorkers) {
+          if (state.worker.isConnected()) {
+            state.worker.send({
+              __orkify: true,
+              type: 'cache:update-tag-timestamp',
+              tag: msg.tag,
+              tagTimestamp: msg.tagTimestamp,
             });
           }
         }
@@ -79,20 +95,25 @@ export class CachePrimary {
   }
 
   sendSnapshot(worker: Worker): void {
-    const entries = this.store.serialize();
-    if (entries.length === 0) return;
-    worker.send({ __orkify: true, type: 'cache:snapshot', entries });
+    const snapshot = this.store.serialize();
+    if (snapshot.entries.length === 0 && snapshot.tagTimestamps.length === 0) return;
+    worker.send({
+      __orkify: true,
+      type: 'cache:snapshot',
+      entries: snapshot.entries,
+      tagTimestamps: snapshot.tagTimestamps,
+    });
   }
 
   async persist(): Promise<void> {
-    const entries = this.store.serialize();
-    await this.persistence.save(entries);
+    const snapshot = this.store.serialize();
+    await this.persistence.save(snapshot);
   }
 
   async restore(): Promise<void> {
-    const entries = await this.persistence.load();
-    if (entries.length > 0) {
-      this.store.applySnapshot(entries);
+    const snapshot = await this.persistence.load();
+    if (snapshot.entries.length > 0 || snapshot.tagTimestamps.length > 0) {
+      this.store.applySnapshot(snapshot);
     }
   }
 

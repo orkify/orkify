@@ -279,10 +279,12 @@ describe('CacheClient', () => {
           ['snap-a', { value: 1 }],
           ['snap-b', { value: 2 }],
         ],
+        tagTimestamps: [['tag-x', 5000]],
       });
 
       expect(clusterClient.get('snap-a')).toBe(1);
       expect(clusterClient.get('snap-b')).toBe(2);
+      expect(clusterClient.getTagExpiration(['tag-x'])).toBe(5000);
       clusterClient.destroy();
     });
 
@@ -365,7 +367,7 @@ describe('CacheClient', () => {
       clusterClient.destroy();
     });
 
-    it('handles incoming cache:invalidate-tag messages', () => {
+    it('handles incoming cache:invalidate-tag messages with timestamp', () => {
       process.env.ORKIFY_CLUSTER_MODE = 'true';
       process.send = vi.fn();
 
@@ -374,10 +376,16 @@ describe('CacheClient', () => {
       clusterClient.set('b', 2, { tags: ['group'] });
 
       const handler = process.listeners('message').at(-1) as (msg: unknown) => void;
-      handler({ __orkify: true, type: 'cache:invalidate-tag', tag: 'group' });
+      handler({
+        __orkify: true,
+        type: 'cache:invalidate-tag',
+        tag: 'group',
+        tagTimestamp: 9999,
+      });
 
       expect(clusterClient.get('a')).toBeUndefined();
       expect(clusterClient.get('b')).toBeUndefined();
+      expect(clusterClient.getTagExpiration(['group'])).toBe(9999);
       clusterClient.destroy();
     });
 
@@ -423,6 +431,69 @@ describe('CacheClient', () => {
         })
       );
       clusterClient.destroy();
+    });
+
+    it('updateTagTimestamp() sends IPC message in cluster mode', () => {
+      process.env.ORKIFY_CLUSTER_MODE = 'true';
+      const sendSpy = vi.fn();
+      process.send = sendSpy;
+
+      const clusterClient = new CacheClient();
+      clusterClient.updateTagTimestamp('tag-a', 7777);
+
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          __orkify: true,
+          type: 'cache:update-tag-timestamp',
+          tag: 'tag-a',
+          tagTimestamp: 7777,
+        })
+      );
+      expect(clusterClient.getTagExpiration(['tag-a'])).toBe(7777);
+      clusterClient.destroy();
+    });
+
+    it('handles incoming cache:update-tag-timestamp messages', () => {
+      process.env.ORKIFY_CLUSTER_MODE = 'true';
+      process.send = vi.fn();
+
+      const clusterClient = new CacheClient();
+
+      const handler = process.listeners('message').at(-1) as (msg: unknown) => void;
+      handler({
+        __orkify: true,
+        type: 'cache:update-tag-timestamp',
+        tag: 'remote-tag',
+        tagTimestamp: 4242,
+      });
+
+      expect(clusterClient.getTagExpiration(['remote-tag'])).toBe(4242);
+      clusterClient.destroy();
+    });
+  });
+
+  describe('tag timestamps', () => {
+    it('getTagExpiration delegates to store', () => {
+      client.invalidateTag('tag-a');
+      expect(client.getTagExpiration(['tag-a'])).toBeGreaterThan(0);
+    });
+
+    it('getTagExpiration returns 0 for unknown tags', () => {
+      expect(client.getTagExpiration(['unknown'])).toBe(0);
+    });
+
+    it('updateTagTimestamp records timestamp locally', () => {
+      client.updateTagTimestamp('tag-a', 3000);
+      expect(client.getTagExpiration(['tag-a'])).toBe(3000);
+    });
+
+    it('updateTagTimestamp defaults to Date.now()', () => {
+      const before = Date.now();
+      client.updateTagTimestamp('tag-a');
+      const after = Date.now();
+      const ts = client.getTagExpiration(['tag-a']);
+      expect(ts).toBeGreaterThanOrEqual(before);
+      expect(ts).toBeLessThanOrEqual(after);
     });
   });
 });

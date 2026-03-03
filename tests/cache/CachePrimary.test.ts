@@ -314,7 +314,7 @@ describe('CachePrimary', () => {
   });
 
   describe('handleMessage — cache:invalidate-tag', () => {
-    it('invalidates locally and broadcasts to all workers', () => {
+    it('invalidates locally and broadcasts with tagTimestamp to all workers', () => {
       const w1 = createMockWorker();
       const w2 = createMockWorker();
       const workers = buildWorkers(w1, w2);
@@ -341,10 +341,18 @@ describe('CachePrimary', () => {
       );
 
       expect(w1.send).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'cache:invalidate-tag', tag: 'group' })
+        expect.objectContaining({
+          type: 'cache:invalidate-tag',
+          tag: 'group',
+          tagTimestamp: expect.any(Number),
+        })
       );
       expect(w2.send).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'cache:invalidate-tag', tag: 'group' })
+        expect.objectContaining({
+          type: 'cache:invalidate-tag',
+          tag: 'group',
+          tagTimestamp: expect.any(Number),
+        })
       );
     });
 
@@ -361,6 +369,35 @@ describe('CachePrimary', () => {
 
       expect(connected.send).toHaveBeenCalled();
       expect(disconnected.send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handleMessage — cache:update-tag-timestamp', () => {
+    it('applies timestamp and broadcasts to all workers', () => {
+      const w1 = createMockWorker();
+      const w2 = createMockWorker();
+      const workers = buildWorkers(w1, w2);
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:update-tag-timestamp', tag: 'tag-a', tagTimestamp: 5000 },
+        workers
+      );
+
+      expect(w1.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'cache:update-tag-timestamp',
+          tag: 'tag-a',
+          tagTimestamp: 5000,
+        })
+      );
+      expect(w2.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'cache:update-tag-timestamp',
+          tag: 'tag-a',
+          tagTimestamp: 5000,
+        })
+      );
     });
   });
 
@@ -381,6 +418,27 @@ describe('CachePrimary', () => {
       const snapshot = newWorker.send.mock.calls[0][0];
       const entry = snapshot.entries.find((e: [string, unknown]) => e[0] === 'a');
       expect(entry[1].tags).toEqual(['group']);
+    });
+
+    it('sends tagTimestamps in snapshot', () => {
+      const w1 = createMockWorker();
+      const workers = buildWorkers(w1);
+
+      // Invalidate a tag to record its timestamp
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:invalidate-tag', tag: 'group' },
+        workers
+      );
+      w1.send.mockClear();
+
+      const newWorker = createMockWorker();
+      primary.sendSnapshot(newWorker as unknown as import('node:cluster').Worker);
+
+      const snapshot = newWorker.send.mock.calls[0][0];
+      expect(snapshot.tagTimestamps).toEqual(
+        expect.arrayContaining([['group', expect.any(Number)]])
+      );
     });
   });
 
@@ -407,6 +465,33 @@ describe('CachePrimary', () => {
       const snapshot = probe.send.mock.calls[0][0];
       const entry = snapshot.entries.find((e: [string, unknown]) => e[0] === 'tagged');
       expect(entry[1].tags).toEqual(['t1']);
+
+      await restored.shutdown();
+    });
+
+    it('persists and restores tag timestamps across instances', async () => {
+      const w = createMockWorker();
+      const workers = buildWorkers(w);
+
+      // Record a tag invalidation timestamp
+      primary.handleMessage(
+        w as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:invalidate-tag', tag: 'group' },
+        workers
+      );
+
+      await primary.persist();
+
+      const restored = new CachePrimary('test');
+      await restored.restore();
+
+      const probe = createMockWorker();
+      restored.sendSnapshot(probe as unknown as import('node:cluster').Worker);
+
+      const snapshot = probe.send.mock.calls[0][0];
+      expect(snapshot.tagTimestamps).toEqual(
+        expect.arrayContaining([['group', expect.any(Number)]])
+      );
 
       await restored.shutdown();
     });

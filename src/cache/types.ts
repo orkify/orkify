@@ -29,6 +29,11 @@ export interface SerializedCacheEntry {
   value: unknown;
 }
 
+export interface CacheSnapshot {
+  entries: Array<[string, SerializedCacheEntry]>;
+  tagTimestamps: Array<[string, number]>;
+}
+
 // IPC messages: Worker → Primary
 export interface CacheSetMessage {
   __orkify: true;
@@ -56,11 +61,19 @@ export interface CacheInvalidateTagMessage {
   type: 'cache:invalidate-tag';
 }
 
+export interface CacheUpdateTagTimestampMessage {
+  __orkify: true;
+  tag: string;
+  tagTimestamp: number;
+  type: 'cache:update-tag-timestamp';
+}
+
 export type CacheWorkerMessage =
   | CacheClearMessage
   | CacheDeleteMessage
   | CacheInvalidateTagMessage
-  | CacheSetMessage;
+  | CacheSetMessage
+  | CacheUpdateTagTimestampMessage;
 
 // IPC messages: Primary → Workers
 export interface CacheBroadcastSetMessage {
@@ -86,11 +99,20 @@ export interface CacheBroadcastClearMessage {
 export interface CacheBroadcastInvalidateTagMessage {
   __orkify: true;
   tag: string;
+  tagTimestamp: number;
   type: 'cache:invalidate-tag';
+}
+
+export interface CacheBroadcastUpdateTagTimestampMessage {
+  __orkify: true;
+  tag: string;
+  tagTimestamp: number;
+  type: 'cache:update-tag-timestamp';
 }
 
 export interface CacheSnapshotMessage {
   __orkify: true;
   entries: Array<[string, SerializedCacheEntry]>;
+  tagTimestamps: Array<[string, number]>;
   type: 'cache:snapshot';
 }

@@ -229,10 +229,13 @@ describe('CacheStore', () => {
     it('replaces all entries', () => {
       store.set('old', 'data');
 
-      store.applySnapshot([
-        ['a', { value: 1 }],
-        ['b', { value: 2, expiresAt: Date.now() + 60_000 }],
-      ]);
+      store.applySnapshot({
+        entries: [
+          ['a', { value: 1 }],
+          ['b', { value: 2, expiresAt: Date.now() + 60_000 }],
+        ],
+        tagTimestamps: [],
+      });
 
       expect(store.get('old')).toBeUndefined();
       expect(store.get('a')).toBe(1);
@@ -240,13 +243,30 @@ describe('CacheStore', () => {
     });
 
     it('skips expired entries in snapshot', () => {
-      store.applySnapshot([
-        ['fresh', { value: 'yes' }],
-        ['stale', { value: 'no', expiresAt: Date.now() - 1000 }],
-      ]);
+      store.applySnapshot({
+        entries: [
+          ['fresh', { value: 'yes' }],
+          ['stale', { value: 'no', expiresAt: Date.now() - 1000 }],
+        ],
+        tagTimestamps: [],
+      });
 
       expect(store.get('fresh')).toBe('yes');
       expect(store.has('stale')).toBe(false);
+    });
+
+    it('restores tag timestamps', () => {
+      store.applySnapshot({
+        entries: [],
+        tagTimestamps: [
+          ['tag-a', 1000],
+          ['tag-b', 2000],
+        ],
+      });
+
+      expect(store.getTagExpiration(['tag-a'])).toBe(1000);
+      expect(store.getTagExpiration(['tag-b'])).toBe(2000);
+      expect(store.getTagExpiration(['tag-a', 'tag-b'])).toBe(2000);
     });
   });
 
@@ -258,17 +278,33 @@ describe('CacheStore', () => {
 
       vi.advanceTimersByTime(501);
 
-      const serialized = store.serialize();
-      expect(serialized).toHaveLength(2);
+      const snapshot = store.serialize();
+      expect(snapshot.entries).toHaveLength(2);
 
-      const keys = serialized.map(([k]) => k);
+      const keys = snapshot.entries.map(([k]) => k);
       expect(keys).toContain('a');
       expect(keys).toContain('b');
       expect(keys).not.toContain('expired');
     });
 
-    it('returns empty array for empty store', () => {
-      expect(store.serialize()).toEqual([]);
+    it('returns empty snapshot for empty store', () => {
+      const snapshot = store.serialize();
+      expect(snapshot.entries).toEqual([]);
+      expect(snapshot.tagTimestamps).toEqual([]);
+    });
+
+    it('includes tag timestamps', () => {
+      store.invalidateTag('tag-a');
+      vi.advanceTimersByTime(100);
+      store.invalidateTag('tag-b');
+
+      const snapshot = store.serialize();
+      const tsMap = new Map(snapshot.tagTimestamps);
+      expect(tsMap.has('tag-a')).toBe(true);
+      expect(tsMap.has('tag-b')).toBe(true);
+      const tsA = tsMap.get('tag-a') ?? 0;
+      const tsB = tsMap.get('tag-b') ?? 0;
+      expect(tsB).toBeGreaterThan(tsA);
     });
   });
 
@@ -330,12 +366,12 @@ describe('CacheStore', () => {
       store.set('a', 1, undefined, ['group']);
       store.set('b', 2, undefined, ['group', 'extra']);
 
-      const serialized = store.serialize();
-      expect(serialized.find(([k]) => k === 'a')?.[1].tags).toEqual(['group']);
-      expect(serialized.find(([k]) => k === 'b')?.[1].tags).toEqual(['group', 'extra']);
+      const snapshot = store.serialize();
+      expect(snapshot.entries.find(([k]) => k === 'a')?.[1].tags).toEqual(['group']);
+      expect(snapshot.entries.find(([k]) => k === 'b')?.[1].tags).toEqual(['group', 'extra']);
 
       const store2 = new CacheStore({ maxEntries: 100 });
-      store2.applySnapshot(serialized);
+      store2.applySnapshot(snapshot);
       expect(store2.get('a')).toBe(1);
       expect(store2.get('b')).toBe(2);
 
@@ -385,6 +421,58 @@ describe('CacheStore', () => {
       expect(store.invalidateTag('tag1')).toEqual([]);
       expect(store.invalidateTag('tag2')).toEqual([]);
       expect(store.invalidateTag('tag3')).toEqual([]);
+    });
+  });
+
+  describe('tag timestamps', () => {
+    it('invalidateTag records a timestamp', () => {
+      store.invalidateTag('tag-a');
+      expect(store.getTagExpiration(['tag-a'])).toBeGreaterThan(0);
+    });
+
+    it('invalidateTag records timestamp even when no entries exist for the tag', () => {
+      store.invalidateTag('empty-tag');
+      expect(store.getTagExpiration(['empty-tag'])).toBeGreaterThan(0);
+    });
+
+    it('getTagExpiration returns max timestamp across tags', () => {
+      store.applyTagTimestamp('tag-a', 1000);
+      store.applyTagTimestamp('tag-b', 2000);
+      store.applyTagTimestamp('tag-c', 1500);
+
+      expect(store.getTagExpiration(['tag-a', 'tag-b', 'tag-c'])).toBe(2000);
+    });
+
+    it('getTagExpiration returns 0 for unknown tags', () => {
+      expect(store.getTagExpiration(['unknown'])).toBe(0);
+    });
+
+    it('getTagExpiration returns 0 for empty array', () => {
+      expect(store.getTagExpiration([])).toBe(0);
+    });
+
+    it('applyTagTimestamp sets timestamp without deleting entries', () => {
+      store.set('key', 'value', undefined, ['tag']);
+      store.applyTagTimestamp('tag', 5000);
+
+      // Entry should still exist
+      expect(store.get('key')).toBe('value');
+      // Timestamp should be recorded
+      expect(store.getTagExpiration(['tag'])).toBe(5000);
+    });
+
+    it('clear() resets tag timestamps', () => {
+      store.invalidateTag('tag-a');
+      expect(store.getTagExpiration(['tag-a'])).toBeGreaterThan(0);
+      store.clear();
+      expect(store.getTagExpiration(['tag-a'])).toBe(0);
+    });
+
+    it('destroy() resets tag timestamps', () => {
+      store.invalidateTag('tag-a');
+      expect(store.getTagExpiration(['tag-a'])).toBeGreaterThan(0);
+      store.destroy();
+      expect(store.getTagExpiration(['tag-a'])).toBe(0);
     });
   });
 

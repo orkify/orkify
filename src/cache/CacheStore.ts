@@ -1,4 +1,10 @@
-import type { CacheConfig, CacheEntry, CacheStats, SerializedCacheEntry } from './types.js';
+import type {
+  CacheConfig,
+  CacheEntry,
+  CacheSnapshot,
+  CacheStats,
+  SerializedCacheEntry,
+} from './types.js';
 import { CACHE_CLEANUP_INTERVAL, CACHE_DEFAULT_MAX_ENTRIES } from '../constants.js';
 
 export class CacheStore {
@@ -8,6 +14,7 @@ export class CacheStore {
   private misses = 0;
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   private tagIndex = new Map<string, Set<string>>(); // tag → keys
+  private tagTimestamps = new Map<string, number>(); // tag → epoch ms of last invalidation
 
   constructor(config?: CacheConfig) {
     this.maxEntries = config?.maxEntries ?? CACHE_DEFAULT_MAX_ENTRIES;
@@ -62,6 +69,7 @@ export class CacheStore {
   clear(): void {
     this.entries.clear();
     this.tagIndex.clear();
+    this.tagTimestamps.clear();
   }
 
   has(key: string): boolean {
@@ -86,6 +94,8 @@ export class CacheStore {
 
   /** Invalidate all entries with the given tag. Returns deleted keys. */
   invalidateTag(tag: string): string[] {
+    this.tagTimestamps.set(tag, Date.now());
+
     const keys = this.tagIndex.get(tag);
     if (!keys || keys.size === 0) return [];
 
@@ -104,6 +114,23 @@ export class CacheStore {
     return deleted;
   }
 
+  /** Returns the most recent invalidation timestamp across the given tags (0 if none). */
+  getTagExpiration(tags: string[]): number {
+    let max = 0;
+    for (const tag of tags) {
+      const ts = this.tagTimestamps.get(tag);
+      if (ts !== undefined && ts > max) {
+        max = ts;
+      }
+    }
+    return max;
+  }
+
+  /** Set a tag invalidation timestamp without deleting entries (for IPC replay). */
+  applyTagTimestamp(tag: string, timestamp: number): void {
+    this.tagTimestamps.set(tag, timestamp);
+  }
+
   /** Apply a set from IPC — no broadcast triggered */
   applySet(key: string, value: unknown, expiresAt?: number, tags?: string[]): void {
     this.set(key, value, expiresAt, tags);
@@ -114,12 +141,13 @@ export class CacheStore {
     this.delete(key);
   }
 
-  /** Apply a full snapshot from primary — replaces all entries */
-  applySnapshot(entries: Array<[string, SerializedCacheEntry]>): void {
+  /** Apply a full snapshot from primary — replaces all entries and tag timestamps */
+  applySnapshot(snapshot: CacheSnapshot): void {
     this.entries.clear();
     this.tagIndex.clear();
+    this.tagTimestamps.clear();
     const now = Date.now();
-    for (const [key, serialized] of entries) {
+    for (const [key, serialized] of snapshot.entries) {
       // Skip expired entries
       if (serialized.expiresAt !== undefined && serialized.expiresAt < now) continue;
       const tags = serialized.tags;
@@ -133,12 +161,15 @@ export class CacheStore {
         this.addToTagIndex(key, tags);
       }
     }
+    for (const [tag, ts] of snapshot.tagTimestamps) {
+      this.tagTimestamps.set(tag, ts);
+    }
   }
 
   /** Export for snapshots and persistence */
-  serialize(): Array<[string, SerializedCacheEntry]> {
+  serialize(): CacheSnapshot {
     const now = Date.now();
-    const result: Array<[string, SerializedCacheEntry]> = [];
+    const entries: Array<[string, SerializedCacheEntry]> = [];
     for (const [key, entry] of this.entries) {
       // Skip expired entries
       if (entry.expiresAt !== undefined && entry.expiresAt < now) continue;
@@ -146,9 +177,9 @@ export class CacheStore {
       if (entry.tags && entry.tags.length > 0) {
         serialized.tags = entry.tags;
       }
-      result.push([key, serialized]);
+      entries.push([key, serialized]);
     }
-    return result;
+    return { entries, tagTimestamps: [...this.tagTimestamps] };
   }
 
   destroy(): void {
@@ -158,6 +189,7 @@ export class CacheStore {
     }
     this.entries.clear();
     this.tagIndex.clear();
+    this.tagTimestamps.clear();
   }
 
   /** Remove all expired entries */

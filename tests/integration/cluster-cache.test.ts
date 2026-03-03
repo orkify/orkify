@@ -133,6 +133,17 @@ const server = createServer((req, res) => {
     cache.invalidateTag(tag);
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true, worker: wid }));
+  } else if (url.pathname === '/cache/get-tag-expiration') {
+    const tags = (params.get('tags') || '').split(',').filter(Boolean);
+    const ts = cache.getTagExpiration(tags);
+    res.writeHead(200);
+    res.end(JSON.stringify({ timestamp: ts, worker: wid }));
+  } else if (url.pathname === '/cache/update-tag-timestamp') {
+    const tag = params.get('tag');
+    const ts = params.has('timestamp') ? Number(params.get('timestamp')) : undefined;
+    cache.updateTagTimestamp(tag, ts);
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, worker: wid }));
   } else if (url.pathname === '/health') {
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true, worker: wid, pid: process.pid }));
@@ -501,6 +512,88 @@ describe('Cluster Cache', () => {
       await sleep(300);
 
       const workers = await verifyAcrossWorkers(PORT, 'reload-tag:a', null);
+      expect(workers.size).toBeGreaterThan(1);
+    }, 60000);
+  });
+
+  describe('tag timestamps', () => {
+    const PORT = 4210;
+    const APP_NAME = 'test-cache-tag-ts';
+    let tempDir: string;
+
+    beforeAll(async () => {
+      tempDir = createTempDir();
+      writeWorkerScript(tempDir, PORT);
+      orkify(`up ${join(tempDir, 'cache-app.mjs')} -n ${APP_NAME} -w ${WORKERS}`);
+      await waitForClusterReady(WORKERS, PORT);
+    }, 60000);
+
+    afterAll(() => {
+      try {
+        orkify(`delete ${APP_NAME}`);
+      } catch {
+        // ignore
+      }
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('invalidateTag timestamp syncs across workers', async () => {
+      // Invalidate a tag on one worker
+      await httpGet(`http://localhost:${PORT}/cache/invalidate-tag?tag=sync-tag`);
+      await sleep(300);
+
+      // All workers should have the timestamp
+      const workers = new Set<string>();
+      for (let i = 0; i < 30; i++) {
+        const { body } = await httpGet(
+          `http://localhost:${PORT}/cache/get-tag-expiration?tags=sync-tag`
+        );
+        const data = JSON.parse(body);
+        expect(data.timestamp).toBeGreaterThan(0);
+        workers.add(data.worker);
+      }
+      expect(workers.size).toBeGreaterThan(1);
+    }, 30000);
+
+    it('updateTagTimestamp syncs across workers', async () => {
+      await httpGet(
+        `http://localhost:${PORT}/cache/update-tag-timestamp?tag=manual-tag&timestamp=99999`
+      );
+      await sleep(300);
+
+      const workers = new Set<string>();
+      for (let i = 0; i < 30; i++) {
+        const { body } = await httpGet(
+          `http://localhost:${PORT}/cache/get-tag-expiration?tags=manual-tag`
+        );
+        const data = JSON.parse(body);
+        expect(data.timestamp).toBe(99999);
+        workers.add(data.worker);
+      }
+      expect(workers.size).toBeGreaterThan(1);
+    }, 30000);
+
+    it('tag timestamps survive reload via snapshot', async () => {
+      // Set a tag timestamp
+      await httpGet(
+        `http://localhost:${PORT}/cache/update-tag-timestamp?tag=reload-tag&timestamp=12345`
+      );
+      await sleep(300);
+
+      // Reload workers
+      orkify(`reload ${APP_NAME}`);
+      await waitForClusterReady(WORKERS, PORT);
+
+      // New workers should have the tag timestamp from snapshot
+      const workers = new Set<string>();
+      for (let i = 0; i < 30; i++) {
+        const { body } = await httpGet(
+          `http://localhost:${PORT}/cache/get-tag-expiration?tags=reload-tag`
+        );
+        const data = JSON.parse(body);
+        expect(data.timestamp).toBe(12345);
+        workers.add(data.worker);
+      }
       expect(workers.size).toBeGreaterThan(1);
     }, 60000);
   });
