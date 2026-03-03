@@ -1,4 +1,4 @@
-<h1><img src="https://raw.githubusercontent.com/orkify/orkify/main/assets/icon.png" alt="" width="36" align="center" /> orkify</h1>
+<h1><img src="assets/icon.png" alt="" width="36" align="center" /> orkify</h1>
 
 [![Beta](https://img.shields.io/badge/status-beta-yellow)](https://github.com/orkify/orkify)
 [![CI](https://github.com/orkify/orkify/actions/workflows/ci.yml/badge.svg)](https://github.com/orkify/orkify/actions/workflows/ci.yml)
