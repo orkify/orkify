@@ -5,7 +5,7 @@
 [![npm](https://img.shields.io/npm/v/orkify)](https://www.npmjs.com/package/orkify)
 [![Node](https://img.shields.io/node/v/orkify)](https://nodejs.org/)
 [![License](https://img.shields.io/npm/l/orkify)](https://github.com/orkify/orkify/blob/main/LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-%E2%89%A55.9-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
 Modern JS process orchestration and deployment for your own infrastructure.
 

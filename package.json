@@ -107,7 +107,7 @@
     "lint-staged": "^16.2.7",
     "prettier": "^3.3.0",
     "socket.io-client": "^4.8.3",
-    "typescript": "^5.4.0",
+    "typescript": "^5.9.0",
     "typescript-eslint": "^8.56.0",
     "vitest": "^4.0.18"
   }
