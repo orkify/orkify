@@ -1,6 +1,7 @@
 import type {
   CacheBroadcastClearMessage,
   CacheBroadcastDeleteMessage,
+  CacheBroadcastInvalidateTagMessage,
   CacheBroadcastSetMessage,
   CacheConfig,
   CacheSetOptions,
@@ -9,10 +10,12 @@ import type {
 } from './types.js';
 import { CACHE_DEFAULT_MAX_VALUE_SIZE } from '../constants.js';
 import { CacheStore } from './CacheStore.js';
+import { serialize, serializedByteLength } from './serialize.js';
 
 type CacheInboundMessage =
   | CacheBroadcastClearMessage
   | CacheBroadcastDeleteMessage
+  | CacheBroadcastInvalidateTagMessage
   | CacheBroadcastSetMessage
   | CacheSnapshotMessage;
 
@@ -52,18 +55,9 @@ export class CacheClient {
       throw new Error(`cache.set(): ttl must be positive, got ${opts.ttl}`);
     }
 
-    // Validate serializability
-    let serialized: string;
-    try {
-      serialized = JSON.stringify(value);
-    } catch (err) {
-      throw new Error(
-        `cache.set(): value for key "${key}" is not serializable: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err }
-      );
-    }
-
-    const byteLength = Buffer.byteLength(serialized, 'utf-8');
+    // Validate serializability and size
+    const serialized = serialize(value);
+    const byteLength = serializedByteLength(serialized);
     if (byteLength > this.maxValueSize) {
       throw new Error(
         `cache.set(): value for key "${key}" is ${byteLength} bytes, exceeds max ${this.maxValueSize} bytes`
@@ -72,10 +66,11 @@ export class CacheClient {
 
     const ttl = opts?.ttl ?? this.defaultTtl;
     const expiresAt = ttl ? Date.now() + ttl * 1000 : undefined;
-    this.store.set(key, value, expiresAt);
+    const tags = opts?.tags;
+    this.store.set(key, value, expiresAt, tags);
 
     if (this.clusterMode && process.send) {
-      process.send({ __orkify: true, type: 'cache:set', key, value, ttl });
+      process.send({ __orkify: true, type: 'cache:set', key, value, ttl, tags });
     }
   }
 
@@ -103,6 +98,14 @@ export class CacheClient {
     return this.store.stats();
   }
 
+  invalidateTag(tag: string): void {
+    this.store.invalidateTag(tag);
+
+    if (this.clusterMode && process.send) {
+      process.send({ __orkify: true, type: 'cache:invalidate-tag', tag });
+    }
+  }
+
   destroy(): void {
     if (this.messageHandler) {
       process.removeListener('message', this.messageHandler);
@@ -118,13 +121,16 @@ export class CacheClient {
     const message = msg as CacheInboundMessage;
     switch (message.type) {
       case 'cache:set':
-        this.store.applySet(message.key, message.value, message.expiresAt);
+        this.store.applySet(message.key, message.value, message.expiresAt, message.tags);
         break;
       case 'cache:delete':
         this.store.applyDelete(message.key);
         break;
       case 'cache:clear':
         this.store.clear();
+        break;
+      case 'cache:invalidate-tag':
+        this.store.invalidateTag(message.tag);
         break;
       case 'cache:snapshot':
         this.store.applySnapshot(message.entries);

@@ -154,6 +154,21 @@ describe('CachePrimary', () => {
         expect.objectContaining({ type: 'cache:delete', key: 'k' })
       );
     });
+
+    it('skips disconnected workers on delete', () => {
+      const connected = createMockWorker(true);
+      const disconnected = createMockWorker(false);
+      const workers = buildWorkers(connected, disconnected);
+
+      primary.handleMessage(
+        connected as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:delete', key: 'k' },
+        workers
+      );
+
+      expect(connected.send).toHaveBeenCalled();
+      expect(disconnected.send).not.toHaveBeenCalled();
+    });
   });
 
   describe('handleMessage — cache:clear', () => {
@@ -175,6 +190,21 @@ describe('CachePrimary', () => {
       );
 
       expect(w1.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'cache:clear' }));
+    });
+
+    it('skips disconnected workers on clear', () => {
+      const connected = createMockWorker(true);
+      const disconnected = createMockWorker(false);
+      const workers = buildWorkers(connected, disconnected);
+
+      primary.handleMessage(
+        connected as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:clear' },
+        workers
+      );
+
+      expect(connected.send).toHaveBeenCalled();
+      expect(disconnected.send).not.toHaveBeenCalled();
     });
   });
 
@@ -244,6 +274,139 @@ describe('CachePrimary', () => {
           entries: expect.arrayContaining([expect.arrayContaining(['persist-test'])]),
         })
       );
+
+      await restored.shutdown();
+    });
+  });
+
+  describe('handleMessage — cache:set with tags', () => {
+    it('stores with tags and broadcasts tags to all workers', () => {
+      const w1 = createMockWorker();
+      const w2 = createMockWorker();
+      const workers = buildWorkers(w1, w2);
+
+      const msg: CacheWorkerMessage = {
+        __orkify: true,
+        type: 'cache:set',
+        key: 'tagged-key',
+        value: 'val',
+        ttl: 60,
+        tags: ['project:proj1'],
+      };
+
+      primary.handleMessage(w1 as unknown as import('node:cluster').Worker, msg, workers);
+
+      expect(w1.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          __orkify: true,
+          type: 'cache:set',
+          key: 'tagged-key',
+          value: 'val',
+          tags: ['project:proj1'],
+        })
+      );
+      expect(w2.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tags: ['project:proj1'],
+        })
+      );
+    });
+  });
+
+  describe('handleMessage — cache:invalidate-tag', () => {
+    it('invalidates locally and broadcasts to all workers', () => {
+      const w1 = createMockWorker();
+      const w2 = createMockWorker();
+      const workers = buildWorkers(w1, w2);
+
+      // First set some tagged entries
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:set', key: 'a', value: 1, tags: ['group'] },
+        workers
+      );
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:set', key: 'b', value: 2, tags: ['group'] },
+        workers
+      );
+      w1.send.mockClear();
+      w2.send.mockClear();
+
+      // Invalidate the tag
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:invalidate-tag', tag: 'group' },
+        workers
+      );
+
+      expect(w1.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'cache:invalidate-tag', tag: 'group' })
+      );
+      expect(w2.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'cache:invalidate-tag', tag: 'group' })
+      );
+    });
+
+    it('skips disconnected workers on invalidate-tag', () => {
+      const connected = createMockWorker(true);
+      const disconnected = createMockWorker(false);
+      const workers = buildWorkers(connected, disconnected);
+
+      primary.handleMessage(
+        connected as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:invalidate-tag', tag: 'group' },
+        workers
+      );
+
+      expect(connected.send).toHaveBeenCalled();
+      expect(disconnected.send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('snapshot includes tag information', () => {
+    it('sends tags in snapshot entries', () => {
+      const w1 = createMockWorker();
+      const workers = buildWorkers(w1);
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:set', key: 'a', value: 1, tags: ['group'] },
+        workers
+      );
+
+      const newWorker = createMockWorker();
+      primary.sendSnapshot(newWorker as unknown as import('node:cluster').Worker);
+
+      const snapshot = newWorker.send.mock.calls[0][0];
+      const entry = snapshot.entries.find((e: [string, unknown]) => e[0] === 'a');
+      expect(entry[1].tags).toEqual(['group']);
+    });
+  });
+
+  describe('persistence round-trips tags', () => {
+    it('persists and restores tags across instances', async () => {
+      const w = createMockWorker();
+      const workers = buildWorkers(w);
+
+      primary.handleMessage(
+        w as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:set', key: 'tagged', value: 'val', tags: ['t1'] },
+        workers
+      );
+
+      await primary.persist();
+
+      const restored = new CachePrimary('test');
+      await restored.restore();
+
+      // Verify tag info survives by sending snapshot
+      const probe = createMockWorker();
+      restored.sendSnapshot(probe as unknown as import('node:cluster').Worker);
+
+      const snapshot = probe.send.mock.calls[0][0];
+      const entry = snapshot.entries.find((e: [string, unknown]) => e[0] === 'tagged');
+      expect(entry[1].tags).toEqual(['t1']);
 
       await restored.shutdown();
     });

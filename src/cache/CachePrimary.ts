@@ -24,7 +24,7 @@ export class CachePrimary {
     switch (msg.type) {
       case 'cache:set': {
         const expiresAt = msg.ttl ? Date.now() + msg.ttl * 1000 : undefined;
-        this.store.set(msg.key, msg.value, expiresAt);
+        this.store.set(msg.key, msg.value, expiresAt, msg.tags);
         // Broadcast to ALL workers (including sender) for consistency
         for (const [, state] of allWorkers) {
           if (state.worker.isConnected()) {
@@ -34,6 +34,7 @@ export class CachePrimary {
               key: msg.key,
               value: msg.value,
               expiresAt,
+              tags: msg.tags,
             });
           }
         }
@@ -57,6 +58,19 @@ export class CachePrimary {
         for (const [, state] of allWorkers) {
           if (state.worker.isConnected()) {
             state.worker.send({ __orkify: true, type: 'cache:clear' });
+          }
+        }
+        break;
+      }
+      case 'cache:invalidate-tag': {
+        this.store.invalidateTag(msg.tag);
+        for (const [, state] of allWorkers) {
+          if (state.worker.isConnected()) {
+            state.worker.send({
+              __orkify: true,
+              type: 'cache:invalidate-tag',
+              tag: msg.tag,
+            });
           }
         }
         break;

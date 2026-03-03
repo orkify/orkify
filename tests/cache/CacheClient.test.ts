@@ -130,13 +130,50 @@ describe('CacheClient', () => {
       const circular: Record<string, unknown> = {};
       circular.self = circular;
 
-      expect(() => client.set('key', circular)).toThrow('not serializable');
+      expect(() => client.set('key', circular)).toThrow();
     });
 
     it('throws on value exceeding max size', () => {
       const smallClient = new CacheClient({ maxValueSize: 10 });
       expect(() => smallClient.set('key', 'a'.repeat(100))).toThrow('exceeds max');
       smallClient.destroy();
+    });
+
+    it('accepts Map values without error', () => {
+      expect(() => client.set('map', new Map([['a', 1]]))).not.toThrow();
+      expect(client.get('map')).toBeInstanceOf(Map);
+    });
+
+    it('accepts Set values without error', () => {
+      expect(() => client.set('set', new Set([1, 2, 3]))).not.toThrow();
+      expect(client.get('set')).toBeInstanceOf(Set);
+    });
+
+    it('accepts Date values without error', () => {
+      const date = new Date('2026-01-01');
+      expect(() => client.set('date', date)).not.toThrow();
+      expect(client.get('date')).toBeInstanceOf(Date);
+    });
+
+    it('rejects functions with descriptive error', () => {
+      expect(() => client.set('fn', () => {})).toThrow();
+    });
+  });
+
+  describe('tags', () => {
+    it('set() with tags stores tags in entry', () => {
+      client.set('key', 'value', { tags: ['group'] });
+      expect(client.get('key')).toBe('value');
+    });
+
+    it('invalidateTag() deletes matching entries locally', () => {
+      client.set('a', 1, { tags: ['group'] });
+      client.set('b', 2, { tags: ['group'] });
+      client.set('c', 3);
+      client.invalidateTag('group');
+      expect(client.get('a')).toBeUndefined();
+      expect(client.get('b')).toBeUndefined();
+      expect(client.get('c')).toBe(3);
     });
   });
 
@@ -305,6 +342,87 @@ describe('CacheClient', () => {
       const standaloneClient = new CacheClient(undefined, buffered);
       expect(standaloneClient.get('x')).toBeUndefined();
       standaloneClient.destroy();
+    });
+
+    it('invalidateTag() sends IPC message in cluster mode', () => {
+      process.env.ORKIFY_CLUSTER_MODE = 'true';
+      const sendSpy = vi.fn();
+      process.send = sendSpy;
+
+      const clusterClient = new CacheClient();
+
+      clusterClient.set('a', 1, { tags: ['group'] });
+      sendSpy.mockClear();
+
+      clusterClient.invalidateTag('group');
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          __orkify: true,
+          type: 'cache:invalidate-tag',
+          tag: 'group',
+        })
+      );
+      clusterClient.destroy();
+    });
+
+    it('handles incoming cache:invalidate-tag messages', () => {
+      process.env.ORKIFY_CLUSTER_MODE = 'true';
+      process.send = vi.fn();
+
+      const clusterClient = new CacheClient();
+      clusterClient.set('a', 1, { tags: ['group'] });
+      clusterClient.set('b', 2, { tags: ['group'] });
+
+      const handler = process.listeners('message').at(-1) as (msg: unknown) => void;
+      handler({ __orkify: true, type: 'cache:invalidate-tag', tag: 'group' });
+
+      expect(clusterClient.get('a')).toBeUndefined();
+      expect(clusterClient.get('b')).toBeUndefined();
+      clusterClient.destroy();
+    });
+
+    it('incoming cache:set with tags stores tags in entry', () => {
+      process.env.ORKIFY_CLUSTER_MODE = 'true';
+      process.send = vi.fn();
+
+      const clusterClient = new CacheClient();
+
+      const handler = process.listeners('message').at(-1) as (msg: unknown) => void;
+      handler({
+        __orkify: true,
+        type: 'cache:set',
+        key: 'tagged-key',
+        value: 'val',
+        tags: ['t1'],
+        expiresAt: Date.now() + 60_000,
+      });
+
+      expect(clusterClient.get('tagged-key')).toBe('val');
+      // Verify tags work by invalidating
+      clusterClient.invalidateTag('t1');
+      expect(clusterClient.get('tagged-key')).toBeUndefined();
+      clusterClient.destroy();
+    });
+
+    it('includes tags in IPC set message', () => {
+      process.env.ORKIFY_CLUSTER_MODE = 'true';
+      const sendSpy = vi.fn();
+      process.send = sendSpy;
+
+      const clusterClient = new CacheClient();
+      clusterClient.set('key', 'value', { ttl: 60, tags: ['group'] });
+
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          __orkify: true,
+          type: 'cache:set',
+          key: 'key',
+          value: 'value',
+          ttl: 60,
+          tags: ['group'],
+        })
+      );
+      clusterClient.destroy();
     });
   });
 });

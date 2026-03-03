@@ -41,7 +41,8 @@ describe('CachePersistence', () => {
       const content = JSON.parse(readFileSync(filePath, 'utf-8'));
       expect(content).toHaveLength(2);
       expect(content[0][0]).toBe('key1');
-      expect(content[0][1].value).toBe('hello');
+      // On disk, values are encoded as { data, encoding }
+      expect(content[0][1].value).toEqual({ data: '"hello"', encoding: 'json' });
     });
 
     it('creates directory if it does not exist', async () => {
@@ -119,6 +120,71 @@ describe('CachePersistence', () => {
 
     it('does nothing if file does not exist', async () => {
       await expect(persistence.clear()).resolves.not.toThrow();
+    });
+  });
+
+  describe('V8-encoded values', () => {
+    it('save/load round-trips Map values', async () => {
+      const map = new Map([
+        ['a', 1],
+        ['b', 2],
+      ]);
+      await persistence.save([['map-key', { value: map }]]);
+
+      const loaded = await persistence.load();
+      expect(loaded).toHaveLength(1);
+      const value = loaded[0][1].value as Map<string, number>;
+      expect(value).toBeInstanceOf(Map);
+      expect(value.get('a')).toBe(1);
+      expect(value.get('b')).toBe(2);
+    });
+
+    it('save/load round-trips Set values', async () => {
+      const set = new Set(['x', 'y', 'z']);
+      await persistence.save([['set-key', { value: set }]]);
+
+      const loaded = await persistence.load();
+      expect(loaded).toHaveLength(1);
+      const value = loaded[0][1].value as Set<string>;
+      expect(value).toBeInstanceOf(Set);
+      expect(value.has('x')).toBe(true);
+      expect(value.size).toBe(3);
+    });
+
+    it('save/load round-trips complex V8 values', async () => {
+      const value = {
+        statuses: new Map([['err1', 'resolved']]),
+        known: new Set(['fp1', 'fp2']),
+      };
+      await persistence.save([['complex', { value }]]);
+
+      const loaded = await persistence.load();
+      const result = loaded[0][1].value as typeof value;
+      expect(result.statuses).toBeInstanceOf(Map);
+      expect(result.statuses.get('err1')).toBe('resolved');
+      expect(result.known).toBeInstanceOf(Set);
+      expect(result.known.has('fp1')).toBe(true);
+    });
+  });
+
+  describe('tags', () => {
+    it('save/load round-trips tags', async () => {
+      await persistence.save([
+        ['a', { value: 1, tags: ['group'] }],
+        ['b', { value: 2, tags: ['group', 'extra'], expiresAt: Date.now() + 60_000 }],
+      ]);
+
+      const loaded = await persistence.load();
+      expect(loaded).toHaveLength(2);
+      expect(loaded[0][1].tags).toEqual(['group']);
+      expect(loaded[1][1].tags).toEqual(['group', 'extra']);
+    });
+
+    it('entries without tags load correctly', async () => {
+      await persistence.save([['no-tags', { value: 'plain' }]]);
+
+      const loaded = await persistence.load();
+      expect(loaded[0][1].tags).toBeUndefined();
     });
   });
 

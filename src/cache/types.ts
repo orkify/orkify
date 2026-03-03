@@ -5,6 +5,7 @@ export interface CacheConfig {
 }
 
 export interface CacheSetOptions {
+  tags?: string[];
   ttl?: number; // seconds
 }
 
@@ -18,11 +19,13 @@ export interface CacheStats {
 export interface CacheEntry {
   expiresAt?: number; // epoch ms
   lastAccessedAt: number;
+  tags?: string[];
   value: unknown;
 }
 
 export interface SerializedCacheEntry {
   expiresAt?: number;
+  tags?: string[];
   value: unknown;
 }
 
@@ -30,6 +33,7 @@ export interface SerializedCacheEntry {
 export interface CacheSetMessage {
   __orkify: true;
   key: string;
+  tags?: string[];
   ttl?: number;
   type: 'cache:set';
   value: unknown;
@@ -46,13 +50,24 @@ export interface CacheClearMessage {
   type: 'cache:clear';
 }
 
-export type CacheWorkerMessage = CacheClearMessage | CacheDeleteMessage | CacheSetMessage;
+export interface CacheInvalidateTagMessage {
+  __orkify: true;
+  tag: string;
+  type: 'cache:invalidate-tag';
+}
+
+export type CacheWorkerMessage =
+  | CacheClearMessage
+  | CacheDeleteMessage
+  | CacheInvalidateTagMessage
+  | CacheSetMessage;
 
 // IPC messages: Primary → Workers
 export interface CacheBroadcastSetMessage {
   __orkify: true;
   expiresAt?: number;
   key: string;
+  tags?: string[];
   type: 'cache:set';
   value: unknown;
 }
@@ -66,6 +81,12 @@ export interface CacheBroadcastDeleteMessage {
 export interface CacheBroadcastClearMessage {
   __orkify: true;
   type: 'cache:clear';
+}
+
+export interface CacheBroadcastInvalidateTagMessage {
+  __orkify: true;
+  tag: string;
+  type: 'cache:invalidate-tag';
 }
 
 export interface CacheSnapshotMessage {

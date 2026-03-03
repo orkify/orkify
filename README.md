@@ -326,10 +326,12 @@ Import it from `orkify/cache`:
 import { cache } from 'orkify/cache';
 
 cache.set('user:123', userData, { ttl: 300 }); // write + broadcast
+cache.set('key', value, { ttl: 300, tags: ['group'] }); // with tags
 cache.get<User>('user:123'); // sync local read
 cache.has('key'); // sync local check
 cache.delete('key'); // delete + broadcast
 cache.clear(); // clear + broadcast
+cache.invalidateTag('group'); // delete all tagged entries
 cache.stats(); // { size, hits, misses, hitRate }
 ```
 
@@ -361,13 +363,36 @@ configure({
 
 cache.set('key', 'value'); // uses defaultTtl (300s)
 cache.set('key', 'value', { ttl: 60 }); // per-key ttl overrides defaultTtl
+cache.set('key', 'value', { ttl: 60, tags: ['group'] }); // with tags
 ```
 
-| Option         | Default                 | Description                                                  |
-| -------------- | ----------------------- | ------------------------------------------------------------ |
-| `maxEntries`   | `10,000`                | Maximum entries before LRU eviction kicks in                 |
-| `defaultTtl`   | `undefined` (no expiry) | Default TTL in seconds for entries without an explicit `ttl` |
-| `maxValueSize` | `1,048,576` (1 MB)      | Maximum byte size of a single serialized value               |
+| Option         | Default                 | Description                                                                    |
+| -------------- | ----------------------- | ------------------------------------------------------------------------------ |
+| `maxEntries`   | `10,000`                | Maximum entries before LRU eviction kicks in                                   |
+| `defaultTtl`   | `undefined` (no expiry) | Default TTL in seconds for entries without an explicit `ttl`                   |
+| `maxValueSize` | `1,048,576` (1 MB)      | Maximum byte size of a single serialized value                                 |
+| `tags`         | `undefined`             | String tags for `set()` — used with `invalidateTag()` for grouped invalidation |
+
+### Tag-Based Invalidation
+
+Tags let you group cache entries for bulk invalidation. A key can have multiple tags, and `invalidateTag()` deletes all entries with that tag across all workers:
+
+```typescript
+// Tag entries when setting them
+cache.set('config:proj1:hostA', configA, { ttl: 300, tags: ['project:proj1'] });
+cache.set('config:proj1:hostB', configB, { ttl: 300, tags: ['project:proj1'] });
+
+// Later, invalidate everything for that project
+cache.invalidateTag('project:proj1'); // deletes both keys, syncs across workers
+```
+
+Use cases:
+
+- **Grouped config**: Invalidate all cached config for a project when settings change
+- **User sessions**: Invalidate all cached data for a user on logout
+- **Deployment**: Clear all cached data for a service on deploy
+
+Tags are strings. A key can have multiple tags (`tags: ['project:1', 'org:5']`), and invalidating either tag deletes the key. Tags are preserved across daemon restarts and survive `orkify reload`.
 
 ### Cluster Mode Details
 
@@ -400,7 +425,7 @@ In cluster mode, the cache persists across daemon restarts and stays in memory a
 | `orkify down`          | Cache starts empty (clean slate)                        |
 | Daemon crash           | Cache starts empty (crash recovery doesn't persist)     |
 
-Cache files are stored per process at `~/.orkify/cache/` as plain JSON.
+Cache files are stored per process at `~/.orkify/cache/` as JSON. Tags and V8 types (Map, Set, Date, etc.) are preserved correctly across restarts.
 
 In standalone/fork mode, the cache lives only in memory. It's gone when the process exits.
 
@@ -419,19 +444,17 @@ The cache is **eventually consistent**. Other workers may read a stale value for
 `set()` validates values before storing:
 
 ```typescript
-// Throws — circular reference
-const circular = {};
-circular.self = circular;
-cache.set('bad', circular); // Error: not serializable
-
 // Throws — exceeds size limit
 cache.set('huge', 'x'.repeat(2_000_000)); // Error: exceeds max 1048576 bytes
 
 // Throws — invalid TTL
 cache.set('key', 'value', { ttl: -1 }); // Error: ttl must be positive
+
+// Throws — functions and symbols are not serializable
+cache.set('fn', () => {}); // Error
 ```
 
-All values must be JSON-serializable since they're transmitted over IPC in cluster mode.
+Values can be any structured-cloneable type: plain objects, arrays, strings, numbers, booleans, `null`, `Map`, `Set`, `Date`, `RegExp`, `Error`, `ArrayBuffer`, and `TypedArray`. JSON-serializable values use JSON internally; complex types (Map, Set, Date, etc.) automatically use V8 serialization. Only functions and symbols are rejected.
 
 ## Socket.IO / WebSocket Support
 

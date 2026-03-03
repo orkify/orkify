@@ -79,6 +79,7 @@ function setupCluster(): void {
     exec: SCRIPT,
     silent: true, // Capture per-worker stdout/stderr for log attribution
     windowsHide: true, // Hide worker console windows on Windows
+    serialization: 'advanced', // V8 structured clone — preserves Map, Set, Date, etc.
     execArgv,
   });
 

@@ -272,6 +272,122 @@ describe('CacheStore', () => {
     });
   });
 
+  describe('tags', () => {
+    it('set() with tags creates tag index entries', () => {
+      store.set('config:proj1:hostA', 'val1', undefined, ['project:proj1']);
+      store.set('config:proj1:hostB', 'val2', undefined, ['project:proj1']);
+      expect(store.get('config:proj1:hostA')).toBe('val1');
+      expect(store.get('config:proj1:hostB')).toBe('val2');
+    });
+
+    it('invalidateTag() deletes all keys with that tag', () => {
+      store.set('a', 1, undefined, ['group']);
+      store.set('b', 2, undefined, ['group']);
+      store.set('c', 3); // no tag
+      store.invalidateTag('group');
+      expect(store.get('a')).toBeUndefined();
+      expect(store.get('b')).toBeUndefined();
+      expect(store.get('c')).toBe(3);
+    });
+
+    it('invalidateTag() returns the list of deleted keys', () => {
+      store.set('x', 1, undefined, ['t']);
+      store.set('y', 2, undefined, ['t']);
+      const deleted = store.invalidateTag('t');
+      expect(deleted).toHaveLength(2);
+      expect(deleted).toContain('x');
+      expect(deleted).toContain('y');
+    });
+
+    it('invalidateTag() for unknown tag returns empty array', () => {
+      expect(store.invalidateTag('nonexistent')).toEqual([]);
+    });
+
+    it('overwriting a key updates tag associations', () => {
+      store.set('key', 1, undefined, ['old-tag']);
+      store.set('key', 2, undefined, ['new-tag']);
+
+      // Old tag should no longer have the key
+      expect(store.invalidateTag('old-tag')).toEqual([]);
+      // New tag should have the key
+      expect(store.invalidateTag('new-tag')).toEqual(['key']);
+    });
+
+    it('delete() cleans up tag index', () => {
+      store.set('key', 1, undefined, ['tag1']);
+      store.delete('key');
+      expect(store.invalidateTag('tag1')).toEqual([]);
+    });
+
+    it('clear() cleans up tag index', () => {
+      store.set('a', 1, undefined, ['tag1']);
+      store.set('b', 2, undefined, ['tag1']);
+      store.clear();
+      expect(store.invalidateTag('tag1')).toEqual([]);
+    });
+
+    it('serialize() / applySnapshot() round-trips tags', () => {
+      store.set('a', 1, undefined, ['group']);
+      store.set('b', 2, undefined, ['group', 'extra']);
+
+      const serialized = store.serialize();
+      expect(serialized.find(([k]) => k === 'a')?.[1].tags).toEqual(['group']);
+      expect(serialized.find(([k]) => k === 'b')?.[1].tags).toEqual(['group', 'extra']);
+
+      const store2 = new CacheStore({ maxEntries: 100 });
+      store2.applySnapshot(serialized);
+      expect(store2.get('a')).toBe(1);
+      expect(store2.get('b')).toBe(2);
+
+      // Tags should be functional after snapshot
+      const deleted = store2.invalidateTag('group');
+      expect(deleted).toHaveLength(2);
+      expect(store2.get('a')).toBeUndefined();
+      expect(store2.get('b')).toBeUndefined();
+      store2.destroy();
+    });
+
+    it('LRU eviction cleans up tag index', () => {
+      const small = new CacheStore({ maxEntries: 2 });
+
+      small.set('a', 1, undefined, ['tag']);
+      vi.advanceTimersByTime(10);
+      small.set('b', 2, undefined, ['tag']);
+      vi.advanceTimersByTime(10);
+
+      // Evicts 'a' (oldest)
+      small.set('c', 3);
+      expect(small.get('a')).toBeUndefined();
+
+      // Tag should only have 'b' now
+      const deleted = small.invalidateTag('tag');
+      expect(deleted).toEqual(['b']);
+      small.destroy();
+    });
+
+    it('sweep cleans up tag index for expired entries', () => {
+      store.set('expires', 1, Date.now() + 30_000, ['tag']);
+      store.set('stays', 2, undefined, ['tag']);
+
+      // Advance past TTL
+      vi.advanceTimersByTime(31_000);
+      // Advance to sweep interval (60s)
+      vi.advanceTimersByTime(30_000);
+
+      // Only 'stays' should remain in the tag
+      const deleted = store.invalidateTag('tag');
+      expect(deleted).toEqual(['stays']);
+    });
+
+    it('key with multiple tags is removed from all tag sets on delete', () => {
+      store.set('key', 1, undefined, ['tag1', 'tag2', 'tag3']);
+      store.delete('key');
+      expect(store.invalidateTag('tag1')).toEqual([]);
+      expect(store.invalidateTag('tag2')).toEqual([]);
+      expect(store.invalidateTag('tag3')).toEqual([]);
+    });
+  });
+
   describe('destroy', () => {
     it('clears entries and stops timer', () => {
       store.set('key', 'value');

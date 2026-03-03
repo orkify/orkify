@@ -71,6 +71,68 @@ const server = createServer((req, res) => {
   } else if (url.pathname === '/cache/stats') {
     res.writeHead(200);
     res.end(JSON.stringify({ ...cache.stats(), worker: wid }));
+  } else if (url.pathname === '/cache/set-map') {
+    try {
+      const key = params.get('key') || 'map-key';
+      const rawEntries = (params.get('entries') || '').split(',').map(p => {
+        const [k, v] = p.split(':');
+        return [k, Number(v)];
+      });
+      cache.set(key, new Map(rawEntries));
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, worker: wid }));
+    } catch (e) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ error: e.message, worker: wid }));
+    }
+  } else if (url.pathname === '/cache/set-set') {
+    try {
+      const key = params.get('key') || 'set-key';
+      const items = (params.get('items') || '').split(',');
+      cache.set(key, new Set(items));
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, worker: wid }));
+    } catch (e) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ error: e.message, worker: wid }));
+    }
+  } else if (url.pathname === '/cache/get-type') {
+    const key = params.get('key');
+    const value = cache.get(key);
+    const info = {
+      isNull: value === null || value === undefined,
+      isMap: value instanceof Map,
+      isSet: value instanceof Set,
+      worker: wid,
+    };
+    if (value instanceof Map) {
+      info.entries = Array.from(value.entries());
+    } else if (value instanceof Set) {
+      info.items = Array.from(value);
+    }
+    res.writeHead(200);
+    res.end(JSON.stringify(info));
+  } else if (url.pathname === '/cache/set-tagged') {
+    try {
+      const key = params.get('key');
+      const value = params.get('value');
+      const tag = params.get('tag');
+      const ttl = params.has('ttl') ? Number(params.get('ttl')) : undefined;
+      const opts = {};
+      if (tag) opts.tags = [tag];
+      if (ttl) opts.ttl = ttl;
+      cache.set(key, value, opts);
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, worker: wid }));
+    } catch (e) {
+      res.writeHead(400);
+      res.end(JSON.stringify({ error: e.message, worker: wid }));
+    }
+  } else if (url.pathname === '/cache/invalidate-tag') {
+    const tag = params.get('tag');
+    cache.invalidateTag(tag);
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, worker: wid }));
   } else if (url.pathname === '/health') {
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true, worker: wid, pid: process.pid }));
@@ -372,6 +434,201 @@ describe('Cluster Cache', () => {
       expect(data.error).toContain('exceeds max');
       expect(data.error).toContain('bytes');
     }, 30000);
+  });
+
+  describe('tag invalidation', () => {
+    const PORT = 4207;
+    const APP_NAME = 'test-cache-tags';
+    let tempDir: string;
+
+    beforeAll(async () => {
+      tempDir = createTempDir();
+      writeWorkerScript(tempDir, PORT);
+      orkify(`up ${join(tempDir, 'cache-app.mjs')} -n ${APP_NAME} -w ${WORKERS}`);
+      await waitForClusterReady(WORKERS, PORT);
+    }, 60000);
+
+    afterAll(() => {
+      try {
+        orkify(`delete ${APP_NAME}`);
+      } catch {
+        // ignore
+      }
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('invalidateTag on one worker deletes all tagged keys on all workers', async () => {
+      // Set multiple keys with the same tag on one worker
+      await httpGet(
+        `http://localhost:${PORT}/cache/set-tagged?key=config:proj1:a&value=va&tag=project:proj1&ttl=60`
+      );
+      await httpGet(
+        `http://localhost:${PORT}/cache/set-tagged?key=config:proj1:b&value=vb&tag=project:proj1&ttl=60`
+      );
+      await sleep(300);
+
+      // Verify both exist across workers
+      const workers1 = await verifyAcrossWorkers(PORT, 'config:proj1:a', 'va');
+      expect(workers1.size).toBeGreaterThan(1);
+
+      // Invalidate the tag from any worker
+      await httpGet(`http://localhost:${PORT}/cache/invalidate-tag?tag=project:proj1`);
+      await sleep(300);
+
+      // Both keys should be gone on all workers
+      const workersA = await verifyAcrossWorkers(PORT, 'config:proj1:a', null);
+      expect(workersA.size).toBeGreaterThan(1);
+      const workersB = await verifyAcrossWorkers(PORT, 'config:proj1:b', null);
+      expect(workersB.size).toBeGreaterThan(1);
+    }, 30000);
+
+    it('tags survive reload (snapshot preserves tag index)', async () => {
+      // Set tagged entries
+      await httpGet(
+        `http://localhost:${PORT}/cache/set-tagged?key=reload-tag:a&value=v1&tag=reload-group&ttl=60`
+      );
+      await httpGet(
+        `http://localhost:${PORT}/cache/set-tagged?key=reload-tag:b&value=v2&tag=reload-group&ttl=60`
+      );
+      await sleep(300);
+
+      // Reload workers
+      orkify(`reload ${APP_NAME}`);
+      await waitForClusterReady(WORKERS, PORT);
+
+      // Tags should still work after reload
+      await httpGet(`http://localhost:${PORT}/cache/invalidate-tag?tag=reload-group`);
+      await sleep(300);
+
+      const workers = await verifyAcrossWorkers(PORT, 'reload-tag:a', null);
+      expect(workers.size).toBeGreaterThan(1);
+    }, 60000);
+  });
+
+  describe('V8 values', () => {
+    const PORT = 4208;
+    const APP_NAME = 'test-cache-v8';
+    let tempDir: string;
+
+    beforeAll(async () => {
+      tempDir = createTempDir();
+      writeWorkerScript(tempDir, PORT);
+      orkify(`up ${join(tempDir, 'cache-app.mjs')} -n ${APP_NAME} -w ${WORKERS}`);
+      await waitForClusterReady(WORKERS, PORT);
+    }, 60000);
+
+    afterAll(() => {
+      try {
+        orkify(`delete ${APP_NAME}`);
+      } catch {
+        // ignore
+      }
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('Map value syncs across workers via IPC', async () => {
+      await httpGet(`http://localhost:${PORT}/cache/set-map?key=my-map&entries=a:1,b:2`);
+      await sleep(300);
+
+      // Verify on multiple workers
+      const workers = new Set<string>();
+      for (let i = 0; i < 30; i++) {
+        const { body } = await httpGet(`http://localhost:${PORT}/cache/get-type?key=my-map`);
+        const data = JSON.parse(body);
+        expect(data.isMap).toBe(true);
+        expect(data.entries).toEqual(
+          expect.arrayContaining([
+            ['a', 1],
+            ['b', 2],
+          ])
+        );
+        workers.add(data.worker);
+      }
+      expect(workers.size).toBeGreaterThan(1);
+    }, 30000);
+
+    it('Set value syncs across workers via IPC', async () => {
+      await httpGet(`http://localhost:${PORT}/cache/set-set?key=my-set&items=x,y,z`);
+      await sleep(300);
+
+      const workers = new Set<string>();
+      for (let i = 0; i < 30; i++) {
+        const { body } = await httpGet(`http://localhost:${PORT}/cache/get-type?key=my-set`);
+        const data = JSON.parse(body);
+        expect(data.isSet).toBe(true);
+        expect(data.items).toEqual(expect.arrayContaining(['x', 'y', 'z']));
+        workers.add(data.worker);
+      }
+      expect(workers.size).toBeGreaterThan(1);
+    }, 30000);
+  });
+
+  describe('V8 values persist across daemon restart', () => {
+    const PORT = 4209;
+    const APP_NAME = 'test-cache-v8-persist';
+    let tempDir: string;
+    let scriptPath: string;
+
+    beforeAll(() => {
+      tempDir = createTempDir();
+      writeWorkerScript(tempDir, PORT);
+      scriptPath = join(tempDir, 'cache-app.mjs');
+    });
+
+    afterAll(() => {
+      try {
+        orkify(`delete ${APP_NAME}`);
+      } catch {
+        // ignore
+      }
+      try {
+        orkify('kill --force');
+      } catch {
+        // ignore
+      }
+      const cacheDir = join(ORKIFY_HOME, 'cache');
+      rmSync(cacheDir, { recursive: true, force: true });
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('V8 values persist on daemon kill and restore on restart', async () => {
+      orkify(`up ${scriptPath} -n ${APP_NAME} -w ${WORKERS}`);
+      await waitForClusterReady(WORKERS, PORT);
+
+      // Set a Map value
+      await httpGet(`http://localhost:${PORT}/cache/set-map?key=persist-map&entries=x:10,y:20`);
+      await sleep(300);
+
+      // Verify it's set
+      const { body: before } = await httpGet(
+        `http://localhost:${PORT}/cache/get-type?key=persist-map`
+      );
+      expect(JSON.parse(before).isMap).toBe(true);
+
+      // Kill daemon gracefully
+      orkify('kill');
+      await waitForDaemonKilled(10000);
+
+      // Restart
+      orkify(`up ${scriptPath} -n ${APP_NAME} -w ${WORKERS}`);
+      await waitForClusterReady(WORKERS, PORT);
+
+      // Map should be restored
+      const workers = new Set<string>();
+      for (let i = 0; i < 30; i++) {
+        const { body } = await httpGet(`http://localhost:${PORT}/cache/get-type?key=persist-map`);
+        const data = JSON.parse(body);
+        expect(data.isMap).toBe(true);
+        expect(data.entries).toEqual(
+          expect.arrayContaining([
+            ['x', 10],
+            ['y', 20],
+          ])
+        );
+        workers.add(data.worker);
+      }
+      expect(workers.size).toBeGreaterThan(1);
+    }, 90000);
   });
 
   describe('persistence across daemon restart', () => {
