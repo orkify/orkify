@@ -21,6 +21,7 @@ Modern JS process orchestration and deployment for your own infrastructure.
 - [Graceful Shutdown](#graceful-shutdown)
 - [Environment Variables](#environment-variables)
 - [Worker IPC (Broadcasting)](#worker-ipc-broadcasting)
+- [Shared Cluster Cache](#shared-cluster-cache)
 - [Socket.IO / WebSocket Support](#socketio--websocket-support)
 - [Log Rotation](#log-rotation)
 - [Environment Files](#environment-files)
@@ -47,6 +48,7 @@ Modern JS process orchestration and deployment for your own infrastructure.
 - **Deployment** - Local and remote deploy with automatic rollback
 - **Cron Scheduler** - Built-in cron that dispatches HTTP requests to managed processes on a schedule
 - **Native TypeScript** - Run `.ts` files directly with no build step (Node.js 22.18+)
+- **Shared Cluster Cache** - Built-in in-memory cache with zero-config cross-worker sync via IPC
 - **Modern Stack** - Pure ESM, TypeScript, Node.js 22.18+
 - **MCP Integration** - Built-in Model Context Protocol server for AI tool integration
 
@@ -313,6 +315,123 @@ process.on('message', (msg) => {
 Messages must have `__orkify: true` and `type: 'broadcast'`. The `channel` and `data` fields are yours to define. The sending worker does **not** receive its own broadcast — only siblings do.
 
 **Request/response pattern**: To route a request to a specific worker (e.g., worker 0 for singletons), broadcast the request. Worker 0 picks it up via `isPrimary`, processes it, and broadcasts the response. Other workers ignore both messages since they don't match any pending request ID.
+
+## Shared Cluster Cache
+
+orkify ships a built-in shared cache that works across cluster workers with zero external dependencies. On a single server, reads are faster than localhost Redis — they're synchronous Map lookups with no network round trip, no serialization, and no async overhead. Writes use Node's built-in IPC (Unix domain sockets), which is also faster than a TCP hop to Redis. No extra process to run, no connection pooling to configure.
+
+Import it from `orkify/cache`:
+
+```typescript
+import { cache } from 'orkify/cache';
+
+cache.set('user:123', userData, { ttl: 300 }); // write + broadcast
+cache.get<User>('user:123'); // sync local read
+cache.has('key'); // sync local check
+cache.delete('key'); // delete + broadcast
+cache.clear(); // clear + broadcast
+cache.stats(); // { size, hits, misses, hitRate }
+```
+
+### How It Works
+
+**Reads are always synchronous local Map lookups** — zero overhead, no IPC, no async. Writes broadcast to all workers via IPC so every worker converges to the same state.
+
+| Mode                       | Behavior                                                |
+| -------------------------- | ------------------------------------------------------- |
+| `npm run dev` (standalone) | Local in-memory Map, no IPC                             |
+| `orkify up -w 1` (fork)    | Local in-memory Map, no IPC                             |
+| `orkify up -w 4` (cluster) | Broadcast cache — writes sync via IPC, reads stay local |
+| `orkify run` (foreground)  | Local in-memory Map, no IPC                             |
+
+The API is identical in every mode. In standalone or fork mode, it degrades gracefully to a plain local cache — no errors, no code changes needed. You can use `orkify/cache` during local development with `node app.js` or `npm run dev` and it works as a regular Map. Deploy with `orkify up -w 4` and the same code now syncs across workers automatically.
+
+### Configuration
+
+Optional — call `configure()` before the first use of `cache`, or defaults apply:
+
+```typescript
+import { cache, configure } from 'orkify/cache';
+
+configure({
+  maxEntries: 50_000, // default: 10,000
+  defaultTtl: 300, // default: no expiry (seconds)
+  maxValueSize: 2 << 20, // default: 1 MB
+});
+
+cache.set('key', 'value'); // uses defaultTtl (300s)
+cache.set('key', 'value', { ttl: 60 }); // per-key ttl overrides defaultTtl
+```
+
+| Option         | Default                 | Description                                                  |
+| -------------- | ----------------------- | ------------------------------------------------------------ |
+| `maxEntries`   | `10,000`                | Maximum entries before LRU eviction kicks in                 |
+| `defaultTtl`   | `undefined` (no expiry) | Default TTL in seconds for entries without an explicit `ttl` |
+| `maxValueSize` | `1,048,576` (1 MB)      | Maximum byte size of a single serialized value               |
+
+### Cluster Mode Details
+
+In cluster mode (`orkify up -w 4`), the cache uses orkify's built-in IPC:
+
+1. Worker A calls `cache.set('key', value)` → stores locally (optimistic) + sends to primary
+2. Primary stores the value, computes `expiresAt`, broadcasts to **all** workers
+3. Every worker (including A) applies the update — all converge to the same state
+
+The primary serializes writes, so concurrent sets to the same key always resolve to a consistent last-write-wins value. New workers joining (on spawn or reload) receive a full cache snapshot immediately so they start warm.
+
+### Persistence
+
+In cluster mode, the cache persists across daemon restarts and stays in memory across `orkify reload`. No configuration needed.
+
+- **`orkify reload`** — the primary stays alive, new workers receive the cache via IPC snapshot. No disk I/O, no data loss.
+- **`orkify daemon-reload`** / **`orkify kill`** — the cache is written to `~/.orkify/cache/<name>.json` before the daemon exits. The new primary restores it on startup, so workers start warm.
+- **Worker crash** — the replacement worker gets a snapshot from the primary immediately.
+- **`orkify down`** — the cache is **not** persisted. Stopping a process is an explicit action — restoring potentially stale data (old sessions, revoked tokens, expired API responses) on a later `orkify up` would cause more problems than it solves.
+- **`orkify kill --force`** — the cache is **not** persisted. Force kill sends SIGKILL with no graceful shutdown.
+- **Daemon crash** — the cache is **not** persisted. Crash recovery restores process configs but the cache starts empty.
+
+| Scenario               | Cache behavior                                          |
+| ---------------------- | ------------------------------------------------------- |
+| `orkify reload`        | Warm — workers get snapshot from primary, zero downtime |
+| `orkify daemon-reload` | Persisted to disk, restored on new daemon startup       |
+| `orkify kill`          | Persisted to disk, restored on next daemon startup      |
+| `orkify kill --force`  | Cache lost (SIGKILL, no graceful shutdown)              |
+| Worker crash           | Replacement gets snapshot from primary                  |
+| `orkify down`          | Cache starts empty (clean slate)                        |
+| Daemon crash           | Cache starts empty (crash recovery doesn't persist)     |
+
+Cache files are stored per process at `~/.orkify/cache/` as plain JSON.
+
+In standalone/fork mode, the cache lives only in memory. It's gone when the process exits.
+
+### Consistency Model
+
+The cache is **eventually consistent**. Other workers may read a stale value for one IPC round trip after a write. For most use cases (session data, rendered pages, API responses) this is fine. If you need strict consistency, use a database.
+
+### Eviction
+
+- **LRU eviction**: When `maxEntries` is reached, the least recently accessed entry is evicted on the next write
+- **TTL expiry**: Expired entries are cleaned up lazily on read and by a background sweep every 60 seconds
+- **Value size limit**: `set()` rejects values exceeding `maxValueSize` (default 1 MB) with a descriptive error
+
+### Validation
+
+`set()` validates values before storing:
+
+```typescript
+// Throws — circular reference
+const circular = {};
+circular.self = circular;
+cache.set('bad', circular); // Error: not serializable
+
+// Throws — exceeds size limit
+cache.set('huge', 'x'.repeat(2_000_000)); // Error: exceeds max 1048576 bytes
+
+// Throws — invalid TTL
+cache.set('key', 'value', { ttl: -1 }); // Error: ttl must be positive
+```
+
+All values must be JSON-serializable since they're transmitted over IPC in cluster mode.
 
 ## Socket.IO / WebSocket Support
 

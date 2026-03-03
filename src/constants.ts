@@ -251,6 +251,12 @@ export const DEPLOY_META_FILE = 'orkify-deploy-meta.json';
 export const DEPLOY_CRASH_WINDOW_DEFAULT = 30; // seconds
 export const ORKIFY_CONFIG_FILE = 'orkify.yml';
 
+// Cache
+export const CACHE_DIR = join(ORKIFY_HOME, 'cache');
+export const CACHE_DEFAULT_MAX_ENTRIES = 10_000;
+export const CACHE_DEFAULT_MAX_VALUE_SIZE = 1024 * 1024; // 1 MB
+export const CACHE_CLEANUP_INTERVAL = 60_000; // 60s
+
 // Telemetry
 export const TELEMETRY_DEFAULT_API_HOST = 'https://api.orkify.com';
 export const TELEMETRY_METRICS_INTERVAL = 10_000;

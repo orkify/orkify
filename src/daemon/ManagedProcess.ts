@@ -795,7 +795,7 @@ export class ManagedProcess extends EventEmitter {
     this.clusterPrimary.send({ type: 'restart-worker', workerId });
   }
 
-  async stop(): Promise<void> {
+  async stop(opts?: { persistCache?: boolean }): Promise<void> {
     this.isShuttingDown = true;
     this.clearForkLaunchTimer();
     this.clearAllLaunchTimers();
@@ -813,7 +813,7 @@ export class ManagedProcess extends EventEmitter {
     if (this.config.execMode === ExecMode.FORK) {
       await this.stopFork();
     } else {
-      await this.stopCluster();
+      await this.stopCluster(opts);
     }
 
     this.outWriter?.end();
@@ -874,7 +874,7 @@ export class ManagedProcess extends EventEmitter {
     });
   }
 
-  private async stopCluster(): Promise<void> {
+  private async stopCluster(opts?: { persistCache?: boolean }): Promise<void> {
     const primary = this.clusterPrimary;
     if (!primary) return;
 
@@ -893,7 +893,7 @@ export class ManagedProcess extends EventEmitter {
 
       // Send shutdown command to cluster primary
       if (primary.connected) {
-        primary.send({ type: 'shutdown' });
+        primary.send({ type: 'shutdown', persistCache: opts?.persistCache });
       } else {
         primary.kill('SIGTERM');
       }

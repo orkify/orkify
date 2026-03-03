@@ -306,11 +306,11 @@ export class Orchestrator extends EventEmitter {
     return { processes, configs: state.processes, mcpState: state.mcp };
   }
 
-  async shutdown(): Promise<void> {
+  async shutdown(opts?: { persistCache?: boolean }): Promise<void> {
     // Stop all processes in parallel for faster shutdown
     await Promise.all(
       Array.from(this.processes.values()).map((container) =>
-        container.stop().catch((err) => {
+        container.stop({ persistCache: opts?.persistCache }).catch((err) => {
           console.error(
             `Failed to stop process "${container.config.name}" during shutdown:`,
             (err as Error).message

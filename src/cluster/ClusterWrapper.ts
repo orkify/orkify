@@ -17,6 +17,8 @@
 import cluster, { type Worker } from 'node:cluster';
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:net';
+import type { CacheWorkerMessage } from '../cache/types.js';
+import { CachePrimary } from '../cache/CachePrimary.js';
 import { METRICS_PROBE_IMPORT } from '../constants.js';
 
 // Force round-robin scheduling on all platforms
@@ -61,6 +63,7 @@ let isShuttingDown = false;
 let isReloading = false;
 const reloadCandidateWorkerIds = new Set<number>(); // cluster worker.id values of temp replacement workers
 let stickyServer: null | Server = null;
+const cachePrimary = new CachePrimary(PROCESS_NAME);
 
 function log(message: string): void {
   const timestamp = new Date().toISOString();
@@ -88,6 +91,10 @@ function setupCluster(): void {
       // will be notified via reload:complete once the outcome is determined.
       if (!reloadCandidateWorkerIds.has(worker.id) && process.send) {
         process.send({ type: 'worker:online', workerId: state.id, pid: state.pid });
+      }
+      // Send cache snapshot to new worker so it starts with a warm cache
+      if (state.worker.isConnected()) {
+        cachePrimary.sendSnapshot(state.worker);
       }
     }
   });
@@ -172,6 +179,11 @@ function setupCluster(): void {
           s.worker.send(message);
         }
       }
+      return;
+    }
+
+    if (probeMsg?.__orkify && probeMsg.type?.startsWith('cache:')) {
+      cachePrimary.handleMessage(worker, probeMsg as CacheWorkerMessage, workers);
       return;
     }
 
@@ -632,6 +644,13 @@ process.on('message', async (message: unknown) => {
       await restartWorker(msg.workerId as number);
       break;
     case 'shutdown':
+      if (msg.persistCache) {
+        await cachePrimary.shutdown().catch((err) => {
+          log(`Cache persist failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      } else {
+        cachePrimary.destroy();
+      }
       await shutdown();
       break;
   }
@@ -642,26 +661,33 @@ process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
 // Start the cluster
-setupCluster();
+(async () => {
+  setupCluster();
 
-log(`Starting ${WORKER_COUNT} workers for ${SCRIPT}...`);
+  // Restore cache from disk before spawning workers
+  await cachePrimary.restore().catch((err) => {
+    log(`Cache restore failed: ${err instanceof Error ? err.message : String(err)}`);
+  });
 
-// Initialize free slots and spawn initial workers
-for (let i = 0; i < WORKER_COUNT; i++) {
-  freeSlots.add(i);
-}
-for (let i = 0; i < WORKER_COUNT; i++) {
-  spawnWorker();
-}
+  log(`Starting ${WORKER_COUNT} workers for ${SCRIPT}...`);
 
-// Setup sticky server if enabled
-if (STICKY && STICKY_PORT) {
-  setupStickyServer(STICKY_PORT);
-}
+  // Initialize free slots and spawn initial workers
+  for (let i = 0; i < WORKER_COUNT; i++) {
+    freeSlots.add(i);
+  }
+  for (let i = 0; i < WORKER_COUNT; i++) {
+    spawnWorker();
+  }
 
-// Signal to daemon that primary is ready
-if (process.send) {
-  process.send({ type: 'primary:ready', pid: process.pid });
-}
+  // Setup sticky server if enabled
+  if (STICKY && STICKY_PORT) {
+    setupStickyServer(STICKY_PORT);
+  }
 
-log('Cluster primary started');
+  // Signal to daemon that primary is ready
+  if (process.send) {
+    process.send({ type: 'primary:ready', pid: process.pid });
+  }
+
+  log('Cluster primary started');
+})();

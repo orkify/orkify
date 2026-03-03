@@ -65,7 +65,7 @@ export interface DaemonContext {
   telemetry: null | TelemetryReporter;
   startMcpHttp: (opts: McpStartPayload) => Promise<void>;
   getMcpOptions: () => McpStartPayload | null;
-  gracefulShutdown: () => Promise<void>;
+  gracefulShutdown: (opts?: { persistCache?: boolean }) => Promise<void>;
   /** Bind IPC socket and start listening */
   startServer: () => Promise<void>;
   cleanup: () => void;
@@ -540,7 +540,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
           }
         }
       } else {
-        await gracefulShutdown();
+        await gracefulShutdown({ persistCache: true });
         if (!foreground) {
           process.exit(0);
         }
@@ -747,7 +747,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
   let isShuttingDown = false;
   let skipServerStop = false;
 
-  async function gracefulShutdown(): Promise<void> {
+  async function gracefulShutdown(opts?: { persistCache?: boolean }): Promise<void> {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
@@ -763,7 +763,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
         mcpOptions = null;
       }
       await telemetry?.shutdown();
-      await orchestrator.shutdown();
+      await orchestrator.shutdown({ persistCache: opts?.persistCache });
       if (!skipServerStop) {
         // Remove PID file before closing the IPC server. The socket
         // disappearing is the signal tests (and CLI) use to detect

@@ -4,13 +4,21 @@
   "description": "Modern JS process orchestration and deployment for your own infrastructure",
   "type": "module",
   "main": "dist/cli/index.js",
+  "exports": {
+    ".": "./dist/cli/index.js",
+    "./cache": {
+      "types": "./dist/cache/index.d.ts",
+      "import": "./dist/cache/index.js"
+    }
+  },
   "bin": {
     "orkify": "./bin/orkify"
   },
   "files": [
     "bin/",
     "boot/",
-    "dist/**/*.js"
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
   ],
   "scripts": {
     "build": "tsc",
