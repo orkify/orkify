@@ -1,6 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ORKIFY_HOME } from './setup.js';
 import {
@@ -14,7 +15,7 @@ import {
 } from './test-utils.js';
 
 const ROOT = process.cwd();
-const CACHE_MODULE = join(ROOT, 'dist', 'cache', 'index.js');
+const CACHE_MODULE = pathToFileURL(join(ROOT, 'dist', 'cache', 'index.js')).href;
 const WORKERS = 2;
 
 function createTempDir(): string {

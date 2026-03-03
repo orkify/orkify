@@ -7,7 +7,7 @@ import {
   readFileSync,
   statSync,
 } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { createGzip } from 'node:zlib';
 import { pack } from 'tar-stream';
@@ -133,12 +133,61 @@ function walkDirectory(
   return files;
 }
 
+interface FileDep {
+  dir: string;
+  files: string[];
+}
+
+/**
+ * Scan package.json for `file:` dependencies. For each one, walk the
+ * referenced directory and collect its files. Returns a rewritten
+ * package.json string with paths pointing to `.file-deps/<name>/` and
+ * a map of the collected files — or null if there are no file deps.
+ */
+export function bundleFileDeps(
+  projectDir: string
+): null | { rewrittenPkg: string; fileDeps: Map<string, FileDep> } {
+  const pkgPath = join(projectDir, 'package.json');
+  if (!existsSync(pkgPath)) return null;
+
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  const fileDeps = new Map<string, FileDep>();
+
+  for (const section of ['dependencies', 'devDependencies'] as const) {
+    const deps = pkg[section] as Record<string, string> | undefined;
+    if (!deps) continue;
+
+    for (const [name, spec] of Object.entries(deps)) {
+      if (!spec.startsWith('file:')) continue;
+
+      const depDir = resolve(projectDir, spec.slice(5));
+      if (!existsSync(depDir)) {
+        throw new Error(`file: dependency "${name}" points to "${depDir}" which does not exist`);
+      }
+
+      const ancestorFilters = collectAncestorFilters(depDir);
+      const builtinIgnore = ig().add(ALWAYS_EXCLUDE);
+      const files = walkDirectory(depDir, depDir, ancestorFilters, builtinIgnore);
+
+      deps[name] = `file:.file-deps/${name}`;
+      fileDeps.set(name, { dir: depDir, files });
+    }
+  }
+
+  if (fileDeps.size === 0) return null;
+  return { rewrittenPkg: JSON.stringify(pkg, null, 2) + '\n', fileDeps };
+}
+
 /**
  * Create a tar.gz archive of the project directory.
  *
  * Walks the directory tree, respecting .gitignore files from the git root
  * all the way down into the project, plus a built-in exclude list
  * (node_modules, .git, .env, etc.).
+ *
+ * Any `file:` dependencies in package.json are bundled into the tarball
+ * under `.file-deps/<name>/` and the paths are rewritten so `npm ci`
+ * can resolve them on the deploy target.
  */
 export async function createTarball(projectDir: string): Promise<string> {
   const artifactsDir = join(ORKIFY_HOME, 'tmp');
@@ -151,6 +200,9 @@ export async function createTarball(projectDir: string): Promise<string> {
   const builtinIgnore = ig().add(ALWAYS_EXCLUDE);
   const files = walkDirectory(projectDir, projectDir, ancestorFilters, builtinIgnore);
 
+  // Check for file: deps to bundle
+  const bundle = bundleFileDeps(projectDir);
+
   const p = pack();
   const gzip = createGzip();
   const output = createWriteStream(tarPath);
@@ -159,8 +211,35 @@ export async function createTarball(projectDir: string): Promise<string> {
 
   for (const file of files) {
     const rel = relative(projectDir, file).split(sep).join('/');
+
+    // Skip package.json if we need to rewrite it
+    if (bundle && rel === 'package.json') continue;
+
     const stat = statSync(file);
     p.entry({ name: rel, size: stat.size, mode: stat.mode, mtime: stat.mtime }, readFileSync(file));
+  }
+
+  if (bundle) {
+    // Add rewritten package.json
+    const content = Buffer.from(bundle.rewrittenPkg);
+    p.entry({ name: 'package.json', size: content.length }, content);
+
+    // Add bundled file: dep contents
+    for (const [name, dep] of bundle.fileDeps) {
+      for (const file of dep.files) {
+        const rel = relative(dep.dir, file).split(sep).join('/');
+        const stat = statSync(file);
+        p.entry(
+          {
+            name: `.file-deps/${name}/${rel}`,
+            size: stat.size,
+            mode: stat.mode,
+            mtime: stat.mtime,
+          },
+          readFileSync(file)
+        );
+      }
+    }
   }
 
   p.finalize();
