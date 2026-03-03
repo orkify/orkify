@@ -8,7 +8,8 @@
     ".": "./dist/cli/index.js",
     "./cache": {
       "types": "./dist/cache/index.d.ts",
-      "import": "./dist/cache/index.js"
+      "import": "./dist/cache/index.js",
+      "default": "./dist/cache/index.js"
     }
   },
   "bin": {
