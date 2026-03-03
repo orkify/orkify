@@ -17,34 +17,63 @@ ORKIFY provides modern JS process orchestration and deployment for your own infr
 
 ```
 orkify/
-├── bin/orkify                    # CLI entry point (shebang script)
+├── bin/orkify                     # CLI entry point (shebang script)
 ├── src/
+│   ├── alerts/
+│   │   └── AlertEvaluator.ts    # Alert rule evaluation
+│   ├── cache/
+│   │   ├── index.ts             # Lazy singleton proxy + early IPC buffer
+│   │   ├── CacheClient.ts       # Public API (get/set/delete/tags/stats)
+│   │   ├── CachePrimary.ts      # Primary-side IPC handler + snapshots
+│   │   ├── CacheStore.ts        # In-memory store (LRU, TTL, tag index)
+│   │   ├── CachePersistence.ts  # Disk save/load for daemon restarts
+│   │   ├── serialize.ts         # V8/JSON value serialization
+│   │   └── types.ts             # Cache types and IPC message interfaces
 │   ├── cli/
-│   │   ├── index.ts            # Commander.js CLI setup
-│   │   └── commands/           # Individual command files
-│   ├── daemon/
-│   │   ├── index.ts            # Daemon entry point
-│   │   ├── Orchestrator.ts      # Main orchestrator
-│   │   ├── ManagedProcess.ts   # Manages individual processes
-│   │   ├── GracefulManager.ts  # Coordinates reloads
-│   │   └── SocketIOManager.ts  # Connection tracking
+│   │   ├── index.ts             # Commander.js CLI setup
+│   │   └── commands/            # Individual command files
 │   ├── cluster/
-│   │   ├── ClusterWrapper.ts   # Primary process for cluster mode
-│   │   ├── Primary.ts          # Cluster primary utilities
-│   │   ├── Worker.ts           # Worker utilities
-│   │   └── StickyBalancer.ts   # Session-based routing
-│   ├── ipc/
-│   │   ├── DaemonClient.ts     # CLI → Daemon communication
-│   │   ├── DaemonServer.ts     # Daemon IPC server
-│   │   └── protocol.ts         # Message serialization
-│   ├── state/
-│   │   └── StateStore.ts       # Process persistence
+│   │   └── ClusterWrapper.ts    # Cluster primary (fork, reload, sticky)
 │   ├── config/
-│   │   └── schema.ts           # Zod validation schemas
+│   │   ├── ConfigStore.ts       # Runtime config persistence
+│   │   └── schema.ts            # Zod validation schemas
+│   ├── cron/
+│   │   └── CronScheduler.ts     # Cron job scheduling
+│   ├── daemon/
+│   │   ├── index.ts             # Daemon entry point
+│   │   ├── Orchestrator.ts      # Central orchestrator, handles all commands
+│   │   ├── ManagedProcess.ts    # Manages a single process (fork or cluster)
+│   │   ├── GracefulManager.ts   # Coordinates graceful reloads
+│   │   ├── RotatingWriter.ts    # Log file rotation
+│   │   └── startDaemon.ts       # Daemon bootstrap
+│   ├── deploy/
+│   │   ├── DeployExecutor.ts    # Deployment orchestration
+│   │   ├── CommandPoller.ts     # Remote command polling
+│   │   ├── config.ts            # Deploy config (orkify.yml)
+│   │   ├── env.ts               # Environment variable handling
+│   │   └── tarball.ts           # Artifact packaging
+│   ├── ipc/
+│   │   ├── DaemonClient.ts      # CLI → Daemon communication
+│   │   ├── DaemonServer.ts      # Daemon IPC server
+│   │   ├── MultiUserClient.ts   # Multi-user IPC support
+│   │   ├── protocol.ts          # Message serialization
+│   │   └── restoreDaemon.ts     # Daemon recovery
+│   ├── mcp/
+│   │   ├── index.ts             # MCP server entry
+│   │   ├── server.ts            # MCP tool definitions
+│   │   ├── auth.ts              # MCP authentication
+│   │   └── http.ts              # MCP HTTP transport
+│   ├── probe/
+│   │   └── parse-frames.ts      # Metrics probe frame parsing
+│   ├── state/
+│   │   └── StateStore.ts        # Process persistence (snapshot.yml)
+│   ├── telemetry/
+│   │   └── TelemetryReporter.ts # Telemetry event batching + flush
 │   ├── types/
-│   │   └── index.ts            # TypeScript interfaces
-│   └── constants.ts            # Paths, timeouts, defaults
-└── examples/                   # Demo applications
+│   │   └── index.ts             # TypeScript interfaces
+│   └── constants.ts             # Paths, timeouts, defaults
+├── tests/                         # Mirrors src/ structure
+└── examples/                      # Demo applications
 ```
 
 ## Build Commands
@@ -132,6 +161,15 @@ chore: update dependencies
 - **Fork mode** (workers=1): Direct child process via `fork()`
 - **Cluster mode** (workers>1): ClusterWrapper primary + N workers
 
+### Cache Architecture
+
+- `orkify/cache` exposes a shared cache singleton via a lazy Proxy
+- In cluster mode (`ORKIFY_CLUSTER_MODE=true` + `process.send`): writes broadcast via IPC through `CachePrimary`, reads are local Map lookups
+- In standalone/fork/run mode: plain local Map, no IPC
+- Features: LRU eviction, TTL, tag-based invalidation, tag timestamps, V8 serialization (Map/Set/Date)
+- Snapshots sent to new workers on spawn; persisted to disk on `orkify kill` / `orkify daemon-reload`
+- Early IPC buffer in `cache/index.ts` captures messages before user code creates the CacheClient
+
 ### IPC Protocol
 
 - JSON messages delimited by newlines
@@ -169,13 +207,17 @@ npm run build
 
 ## Important Files
 
-| File                            | Purpose                                    |
-| ------------------------------- | ------------------------------------------ |
-| `src/daemon/Orchestrator.ts`    | Central orchestrator, handles all commands |
-| `src/daemon/ManagedProcess.ts`  | Manages a single process (fork or cluster) |
-| `src/cluster/ClusterWrapper.ts` | Cluster primary that manages workers       |
-| `src/ipc/DaemonClient.ts`       | CLI-side IPC, auto-starts daemon           |
-| `src/ipc/DaemonServer.ts`       | Daemon-side IPC server                     |
+| File                            | Purpose                                              |
+| ------------------------------- | ---------------------------------------------------- |
+| `src/daemon/Orchestrator.ts`    | Central orchestrator, handles all commands           |
+| `src/daemon/ManagedProcess.ts`  | Manages a single process (fork or cluster)           |
+| `src/cluster/ClusterWrapper.ts` | Cluster primary (workers, reload, sticky, cache IPC) |
+| `src/cache/CacheClient.ts`      | Public cache API used by application code            |
+| `src/cache/CachePrimary.ts`     | Primary-side cache: IPC handling, snapshots, persist |
+| `src/cache/CacheStore.ts`       | In-memory store with LRU, TTL, tags, timestamps      |
+| `src/ipc/DaemonClient.ts`       | CLI-side IPC, auto-starts daemon                     |
+| `src/ipc/DaemonServer.ts`       | Daemon-side IPC server                               |
+| `src/deploy/DeployExecutor.ts`  | Deployment orchestration (orkify.yml)                |
 
 ## Environment Variables Set for Managed Processes
 
@@ -210,14 +252,6 @@ During a rolling reload (`orkify reload`), each worker slot gets up to N retries
 4. If all retries exhausted: keep old worker alive, mark it **stale**, abort remaining slots
 
 Stale workers are shown as `online (stale)` in `orkify list`. A subsequent successful reload clears all stale flags.
-
-Key implementation details:
-
-- `ClusterWrapper.reload()` uses a try-finally to always reset `isReloading`
-- `waitForReady()` rejects on timeout (instead of resolving) and cleans up its polling interval
-- `reload:complete` IPC message includes per-slot results (`success` / `stale`)
-- `ManagedProcess` propagates stale flags via `WorkerState.stale` and `getInfo()`
-- The `--reload-retries` option is passed to ClusterWrapper via `ORKIFY_RELOAD_RETRIES` env var
 
 ## Common Issues
 
