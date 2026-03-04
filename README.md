@@ -496,6 +496,9 @@ orkify auto-detects Next.js apps (via `package.json` or `next.config.{ts,js,mjs}
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  // Enable 'use cache' directives (required for Next.js 16)
+  cacheComponents: true,
+
   // Next.js 16 'use cache' directives — backed by orkify/cache
   cacheHandlers: {
     default: require.resolve('orkify/next/use-cache'),
