@@ -10,6 +10,16 @@
       "types": "./dist/cache/index.d.ts",
       "import": "./dist/cache/index.js",
       "default": "./dist/cache/index.js"
+    },
+    "./next/use-cache": {
+      "types": "./dist/next/use-cache.d.ts",
+      "import": "./dist/next/use-cache.js",
+      "default": "./dist/next/use-cache.js"
+    },
+    "./next/isr-cache": {
+      "types": "./dist/next/isr-cache.d.ts",
+      "import": "./dist/next/isr-cache.js",
+      "default": "./dist/next/isr-cache.js"
     }
   },
   "bin": {

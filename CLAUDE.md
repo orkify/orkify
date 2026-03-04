@@ -63,6 +63,11 @@ orkify/
 │   │   ├── server.ts            # MCP tool definitions
 │   │   ├── auth.ts              # MCP authentication
 │   │   └── http.ts              # MCP HTTP transport
+│   ├── next/
+│   │   ├── types.ts             # Next.js cache handler interfaces
+│   │   ├── stream.ts            # ReadableStream ↔ Buffer utilities
+│   │   ├── use-cache.ts         # 'use cache' handler (cacheHandlers)
+│   │   └── isr-cache.ts         # ISR/route cache handler (cacheHandler)
 │   ├── probe/
 │   │   └── parse-frames.ts      # Metrics probe frame parsing
 │   ├── state/
@@ -170,6 +175,15 @@ chore: update dependencies
 - Snapshots sent to new workers on spawn; persisted to disk on `orkify kill` / `orkify daemon-reload`
 - Early IPC buffer in `cache/index.ts` captures messages before user code creates the CacheClient
 
+### Next.js Cache Handlers
+
+- `orkify/next/use-cache` — handler for Next.js 16 `'use cache'` directives (`cacheHandlers` config)
+- `orkify/next/isr-cache` — handler for ISR/route cache (`cacheHandler` config)
+- Both are thin adapters over `orkify/cache`: stream ↔ Buffer conversion, staleness checks, tag delegation
+- Both use the same cache singleton, so tag invalidations affect both ISR and 'use cache' entries
+- Work standalone and in cluster mode — the cache handles mode detection automatically
+- Example app: `examples/nextjs/`
+
 ### IPC Protocol
 
 - JSON messages delimited by newlines
@@ -218,6 +232,8 @@ npm run build
 | `src/ipc/DaemonClient.ts`       | CLI-side IPC, auto-starts daemon                     |
 | `src/ipc/DaemonServer.ts`       | Daemon-side IPC server                               |
 | `src/deploy/DeployExecutor.ts`  | Deployment orchestration (orkify.yml)                |
+| `src/next/use-cache.ts`         | Next.js 'use cache' handler (cacheHandlers)          |
+| `src/next/isr-cache.ts`         | Next.js ISR/route cache handler (cacheHandler)       |
 
 ## Environment Variables Set for Managed Processes
 
