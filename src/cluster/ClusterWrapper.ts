@@ -12,6 +12,7 @@
  * - ORKIFY_PROCESS_ID: Process ID in ORKIFY
  * - ORKIFY_KILL_TIMEOUT: Timeout for graceful shutdown
  * - ORKIFY_STICKY: Whether to use sticky sessions
+ * - ORKIFY_ARGS: JSON-encoded array of arguments to pass to the user script
  */
 
 import cluster, { type Worker } from 'node:cluster';
@@ -44,6 +45,7 @@ const STICKY_PORT = process.env.ORKIFY_STICKY_PORT
   : process.env.PORT
     ? parseInt(process.env.PORT, 10)
     : null;
+const SCRIPT_ARGS: string[] = process.env.ORKIFY_ARGS ? JSON.parse(process.env.ORKIFY_ARGS) : [];
 const HEALTH_CHECK = process.env.ORKIFY_HEALTH_CHECK || null;
 const HEALTH_PORT = process.env.ORKIFY_PORT ? parseInt(process.env.ORKIFY_PORT, 10) : null;
 
@@ -77,6 +79,7 @@ function setupCluster(): void {
 
   cluster.setupPrimary({
     exec: SCRIPT,
+    args: SCRIPT_ARGS,
     silent: true, // Capture per-worker stdout/stderr for log attribution
     windowsHide: true, // Hide worker console windows on Windows
     serialization: 'advanced', // V8 structured clone — preserves Map, Set, Date, etc.

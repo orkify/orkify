@@ -32,9 +32,9 @@ describe('Next.js Cache Handlers', () => {
 
     // Start with orkify in cluster mode
     orkify(
-      `up ${join(EXAMPLE_DIR, 'node_modules/.bin/next')} start -p ${PORT} -n ${APP_NAME} -w ${WORKERS}`
+      `up ${join(EXAMPLE_DIR, 'node_modules/.bin/next')} -n ${APP_NAME} -w ${WORKERS} --cwd ${EXAMPLE_DIR} --args "start -p ${PORT}"`
     );
-    await waitForClusterReady(WORKERS, PORT);
+    await waitForClusterReady(WORKERS, PORT, 60_000, '/api/health');
   }, 180_000);
 
   afterAll(() => {
@@ -122,7 +122,7 @@ describe('Next.js Cache Handlers', () => {
 
     // Reload all workers
     orkify(`reload ${APP_NAME}`);
-    await waitForClusterReady(WORKERS, PORT);
+    await waitForClusterReady(WORKERS, PORT, 60_000, '/api/health');
 
     // ISR page should still serve the cached version
     const { body: after } = await httpGet(`http://localhost:${PORT}/isr`);

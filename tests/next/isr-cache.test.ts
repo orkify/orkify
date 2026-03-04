@@ -19,11 +19,14 @@ vi.mock('../../src/cache/index.js', () => {
   return { cache: proxy };
 });
 
-const { default: handler } = await import('../../src/next/isr-cache.js');
+const { default: OrkifyCacheHandler } = await import('../../src/next/isr-cache.js');
 
 describe('isr-cache handler', () => {
+  let handler: InstanceType<typeof OrkifyCacheHandler>;
+
   beforeEach(() => {
     testClient = new CacheClient();
+    handler = new OrkifyCacheHandler();
   });
 
   afterEach(() => {

@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing ?tag= parameter' }, { status: 400 });
   }
 
-  revalidateTag(tag);
+  revalidateTag(tag, { expire: 0 });
 
   return NextResponse.json({ revalidated: true, tag });
 }

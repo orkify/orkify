@@ -31,11 +31,3 @@ export interface StoredCacheEntry {
   tags: string[];
   timestamp: number;
 }
-
-/** ISR / route cache handler — 4 methods. */
-export interface NextISRCacheHandler {
-  get(key: string): Promise<null | unknown>;
-  resetRequestCache(): void;
-  revalidateTag(tag: string | string[]): Promise<void>;
-  set(key: string, data: unknown, ctx: { tags: string[] }): Promise<void>;
-}

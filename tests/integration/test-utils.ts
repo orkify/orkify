@@ -205,7 +205,8 @@ export async function waitForWorkersOnline(
 export async function waitForClusterReady(
   expectedWorkers: number,
   port: number,
-  maxWait = 30000
+  maxWait = 30000,
+  healthPath = '/health'
 ): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < maxWait) {
@@ -217,7 +218,7 @@ export async function waitForClusterReady(
     ).length;
 
     if (onlineWorkers >= expectedWorkers) {
-      const { status } = await httpGet(`http://localhost:${port}/health`);
+      const { status } = await httpGet(`http://localhost:${port}${healthPath}`);
       if (status === 200) {
         return;
       }

@@ -350,6 +350,9 @@ export class ManagedProcess extends EventEmitter {
     if (this.cronSecret) {
       env.ORKIFY_CRON_SECRET = this.cronSecret;
     }
+    if (this.config.args.length > 0) {
+      env.ORKIFY_ARGS = JSON.stringify(this.config.args);
+    }
 
     // Spawn the cluster wrapper as the primary
     // windowsHide is supported by fork() but not in TypeScript types
