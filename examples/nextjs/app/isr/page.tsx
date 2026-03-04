@@ -1,6 +1,10 @@
-export const revalidate = 10;
+'use cache';
 
-export default function ISRPage() {
+import { cacheLife } from 'next/cache';
+
+export default async function ISRPage() {
+  cacheLife({ revalidate: 10 });
+
   return (
     <main>
       <h1>ISR Page</h1>
