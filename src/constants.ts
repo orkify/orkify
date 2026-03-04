@@ -152,6 +152,27 @@ try {
       }
     }
 
+    // CVE-2025-29927 / CVE-2024-46982: strip dangerous headers from external requests
+    try {
+      const _stripHeaders = ["x-middleware-subrequest", "x-now-route-matches"];
+      const _isLoopback = (a) => a === "127.0.0.1" || a === "::1" || a === "::ffff:127.0.0.1";
+      function _wrapEmit(Server) {
+        const orig = Server.prototype.emit;
+        Server.prototype.emit = function(event, ...args) {
+          if (event === "request") {
+            const req = args[0];
+            if (!_isLoopback(req?.socket?.remoteAddress || "")) {
+              for (const h of _stripHeaders) delete req.headers[h];
+            }
+          }
+          return orig.apply(this, [event, ...args]);
+        };
+      }
+      const _http = await import("node:http");
+      _wrapEmit(_http.Server);
+      try { const _https = await import("node:https"); _wrapEmit(_https.Server); } catch {}
+    } catch {}
+
     // Mirrors parseUserFrames() in src/probe/parse-frames.ts — keep in sync
     function _orkifyParseUserFrames(stack) {
       const frames = [];

@@ -262,6 +262,74 @@ processes:
     });
   });
 
+  describe('getOrkifyConfig with buildEnv', () => {
+    it('parses buildEnv from orkify.yml', () => {
+      const yml = `
+version: 1
+deploy:
+  install: npm ci
+  build: npm run build
+  buildEnv:
+    NEXT_PUBLIC_API_URL: "https://api.example.com"
+    NEXT_PUBLIC_SITE_NAME: "My App"
+processes:
+  - name: app
+    script: server.js
+    workerCount: 0
+`;
+      writeFileSync(join(tempDir, ORKIFY_CONFIG_FILE), yml, 'utf-8');
+
+      const config = getOrkifyConfig(tempDir);
+      if (!config) throw new Error('expected config');
+      expect(config.deploy).toBeDefined();
+      if (!config.deploy) throw new Error('expected deploy section');
+      expect(config.deploy.buildEnv).toEqual({
+        NEXT_PUBLIC_API_URL: 'https://api.example.com',
+        NEXT_PUBLIC_SITE_NAME: 'My App',
+      });
+    });
+
+    it('buildEnv is optional — config without it still works', () => {
+      const yml = `
+version: 1
+deploy:
+  install: npm ci
+processes:
+  - name: app
+    script: server.js
+`;
+      writeFileSync(join(tempDir, ORKIFY_CONFIG_FILE), yml, 'utf-8');
+
+      const config = getOrkifyConfig(tempDir);
+      if (!config) throw new Error('expected config');
+      expect(config.deploy).toBeDefined();
+      if (!config.deploy) throw new Error('expected deploy section');
+      expect(config.deploy.buildEnv).toBeUndefined();
+    });
+
+    it('buildEnv values are Record<string, string>', () => {
+      const yml = `
+version: 1
+deploy:
+  install: npm ci
+  buildEnv:
+    KEY_A: "value-a"
+    KEY_B: "value-b"
+    KEY_C: "123"
+processes:
+  - name: app
+    script: server.js
+`;
+      writeFileSync(join(tempDir, ORKIFY_CONFIG_FILE), yml, 'utf-8');
+
+      const config = getOrkifyConfig(tempDir);
+      if (!config?.deploy?.buildEnv) throw new Error('expected buildEnv');
+      expect(typeof config.deploy.buildEnv.KEY_A).toBe('string');
+      expect(typeof config.deploy.buildEnv.KEY_B).toBe('string');
+      expect(config.deploy.buildEnv.KEY_C).toBe('123');
+    });
+  });
+
   describe('getOrkifyConfig edge cases', () => {
     it('returns null for empty YAML file', () => {
       writeFileSync(join(tempDir, ORKIFY_CONFIG_FILE), '', 'utf-8');

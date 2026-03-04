@@ -27,6 +27,7 @@ import type {
   TelemetryConfig,
 } from '../types/index.js';
 import { DEPLOY_CRASH_WINDOW_DEFAULT, DEPLOY_META_FILE, ORKIFY_DEPLOYS_DIR } from '../constants.js';
+import { detectFramework } from '../detect/framework.js';
 import { getOrkifyConfig } from './config.js';
 
 export class DeployExecutor {
@@ -37,6 +38,7 @@ export class DeployExecutor {
   private options: DeployOptions;
   private buildLog = '';
   private buildLogLines: string[] = [];
+  private nextDeploymentId: string | undefined;
 
   constructor(
     config: TelemetryConfig,
@@ -91,6 +93,11 @@ export class DeployExecutor {
         'utf-8'
       );
 
+      // 2c. Detect Next.js for version skew protection
+      if (detectFramework(releaseDir) === 'nextjs') {
+        this.nextDeploymentId = `v${this.cmd.version}-${this.cmd.artifactId.slice(0, 8)}`;
+      }
+
       // 3. Fetch secrets
       const secrets =
         this.options.secrets !== undefined
@@ -98,14 +105,21 @@ export class DeployExecutor {
           : await this.fetchSecrets(this.cmd.downloadToken);
 
       // 4. Install + 5. Build
+      const buildEnv = { ...secrets, ...deployConfig.buildEnv };
+
+      // Pass NEXT_DEPLOYMENT_ID to build (unless user already set it)
+      if (this.nextDeploymentId && !buildEnv.NEXT_DEPLOYMENT_ID) {
+        buildEnv.NEXT_DEPLOYMENT_ID = this.nextDeploymentId;
+      }
+
       if (!this.options.skipInstall) {
         this.reportPhase('installing');
-        await this.runCommand(deployConfig.install, releaseDir, secrets);
+        await this.runCommand(deployConfig.install, releaseDir, buildEnv);
       }
 
       if (!this.options.skipBuild && deployConfig.build) {
         this.reportPhase('building');
-        await this.runCommand(deployConfig.build, releaseDir, secrets);
+        await this.runCommand(deployConfig.build, releaseDir, buildEnv);
       }
 
       // 6. Swap symlink
@@ -336,7 +350,12 @@ export class DeployExecutor {
 
     // Default NODE_ENV=production for runtime processes during deploy.
     // Users can override this via secrets/env vars on the dashboard.
-    const runtimeEnv = { NODE_ENV: 'production', ...secrets };
+    const runtimeEnv: Record<string, string> = { NODE_ENV: 'production', ...secrets };
+
+    // Pass NEXT_DEPLOYMENT_ID to runtime for version skew protection
+    if (this.nextDeploymentId && !runtimeEnv.NEXT_DEPLOYMENT_ID) {
+      runtimeEnv.NEXT_DEPLOYMENT_ID = this.nextDeploymentId;
+    }
 
     const result = await this.orchestrator.reconcile(resolvedConfigs, runtimeEnv);
 

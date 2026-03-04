@@ -31,6 +31,7 @@ export interface ProcessConfig {
   logMaxAge: number;
   restartOnMemory?: number;
   cron?: CronJob[];
+  framework?: string;
 }
 
 export interface WorkerInfo {
@@ -119,6 +120,7 @@ export interface UpPayload {
   logMaxAge?: number;
   restartOnMemory?: number;
   cron?: CronJob[];
+  framework?: string;
 }
 
 export interface KillPayload {
@@ -319,6 +321,7 @@ export interface DeployStatus {
 export interface DeploySettings {
   install: string;
   build?: string;
+  buildEnv?: Record<string, string>;
   crashWindow?: number;
 }
 

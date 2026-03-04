@@ -33,6 +33,7 @@ export const startOptionsSchema = z.object({
   logMaxFiles: z.number().int().min(0).max(10000).default(DEFAULT_LOG_MAX_FILES),
   logMaxAge: z.number().int().nonnegative().default(DEFAULT_LOG_MAX_AGE),
   restartOnMemory: z.number().int().nonnegative().optional(),
+  framework: z.string().optional(),
 });
 
 export type StartOptions = z.infer<typeof startOptionsSchema>;

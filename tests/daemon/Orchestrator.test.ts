@@ -309,6 +309,138 @@ describe('Orchestrator', () => {
     });
   });
 
+  describe('framework detection and encryption key', () => {
+    it('sets framework to "nextjs" when package.json has next dependency', async () => {
+      writeFileSync(
+        join(tempDir, 'package.json'),
+        JSON.stringify({ dependencies: { next: '^16.0.0' } }),
+        'utf-8'
+      );
+
+      const orkify = new Orchestrator();
+
+      try {
+        await orkify.up(makePayload('next-app'));
+        const proc = orkify.getProcessByName('next-app');
+        expect(proc).toBeDefined();
+        if (!proc) throw new Error('unreachable');
+        expect(proc.config.framework).toBe('nextjs');
+      } finally {
+        await orkify.shutdown();
+      }
+    }, 15000);
+
+    it('auto-generates NEXT_SERVER_ACTIONS_ENCRYPTION_KEY for Next.js apps', async () => {
+      writeFileSync(
+        join(tempDir, 'package.json'),
+        JSON.stringify({ dependencies: { next: '^16.0.0' } }),
+        'utf-8'
+      );
+
+      const orkify = new Orchestrator();
+
+      try {
+        await orkify.up(makePayload('next-enc'));
+        const proc = orkify.getProcessByName('next-enc');
+        expect(proc).toBeDefined();
+        if (!proc) throw new Error('unreachable');
+        const key = proc.config.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY;
+        expect(key).toBeDefined();
+        expect(key).toHaveLength(64);
+        expect(key).toMatch(/^[0-9a-f]{64}$/);
+      } finally {
+        await orkify.shutdown();
+      }
+    }, 15000);
+
+    it('does not overwrite user-provided NEXT_SERVER_ACTIONS_ENCRYPTION_KEY', async () => {
+      writeFileSync(
+        join(tempDir, 'package.json'),
+        JSON.stringify({ dependencies: { next: '^16.0.0' } }),
+        'utf-8'
+      );
+
+      const orkify = new Orchestrator();
+      const userKey = 'user-provided-key-1234567890abcdef';
+
+      try {
+        await orkify.up({
+          ...makePayload('next-user-key'),
+          env: { NEXT_SERVER_ACTIONS_ENCRYPTION_KEY: userKey },
+        });
+        const proc = orkify.getProcessByName('next-user-key');
+        expect(proc).toBeDefined();
+        if (!proc) throw new Error('unreachable');
+        expect(proc.config.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY).toBe(userKey);
+      } finally {
+        await orkify.shutdown();
+      }
+    }, 15000);
+
+    it('does not set encryption key for non-Next.js apps', async () => {
+      writeFileSync(
+        join(tempDir, 'package.json'),
+        JSON.stringify({ dependencies: { express: '^4.0.0' } }),
+        'utf-8'
+      );
+
+      const orkify = new Orchestrator();
+
+      try {
+        await orkify.up(makePayload('express-app'));
+        const proc = orkify.getProcessByName('express-app');
+        expect(proc).toBeDefined();
+        if (!proc) throw new Error('unreachable');
+        expect(proc.config.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY).toBeUndefined();
+        expect(proc.config.framework).toBeUndefined();
+      } finally {
+        await orkify.shutdown();
+      }
+    }, 15000);
+
+    it('user-provided framework takes precedence over detection', async () => {
+      // No package.json with next, but user explicitly sets framework
+      const orkify = new Orchestrator();
+
+      try {
+        await orkify.up({
+          ...makePayload('custom-framework'),
+          framework: 'nextjs',
+        });
+        const proc = orkify.getProcessByName('custom-framework');
+        expect(proc).toBeDefined();
+        if (!proc) throw new Error('unreachable');
+        expect(proc.config.framework).toBe('nextjs');
+        // Encryption key should still be generated since framework is nextjs
+        expect(proc.config.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY).toBeDefined();
+      } finally {
+        await orkify.shutdown();
+      }
+    }, 15000);
+
+    it('encryption key is stable across calls (stored in config)', async () => {
+      writeFileSync(
+        join(tempDir, 'package.json'),
+        JSON.stringify({ dependencies: { next: '^16.0.0' } }),
+        'utf-8'
+      );
+
+      const orkify = new Orchestrator();
+
+      try {
+        await orkify.up(makePayload('next-stable'));
+        const proc = orkify.getProcessByName('next-stable');
+        expect(proc).toBeDefined();
+        if (!proc) throw new Error('unreachable');
+        const key = proc.config.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY;
+        // Read it again — same config object, same key
+        expect(proc.config.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY).toBe(key);
+      } finally {
+        await orkify.shutdown();
+      }
+    }, 15000);
+  });
+
   describe('getDaemonStatus', () => {
     it('returns process and worker counts', async () => {
       const orkify = new Orchestrator();

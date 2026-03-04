@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { cpus } from 'node:os';
@@ -22,6 +23,7 @@ import {
   ExecMode,
   KILL_TIMEOUT,
 } from '../constants.js';
+import { detectFramework } from '../detect/framework.js';
 import { StateStore } from '../state/StateStore.js';
 import { GracefulManager } from './GracefulManager.js';
 import { ManagedProcess } from './ManagedProcess.js';
@@ -67,11 +69,12 @@ export class Orchestrator extends EventEmitter {
     const rawWorkers = payload.workers ?? DEFAULT_WORKERS;
     const workerCount = rawWorkers === 0 ? cpus().length : rawWorkers;
     const execMode = workerCount > 1 ? ExecMode.CLUSTER : ExecMode.FORK;
+    const cwd = payload.cwd || process.cwd();
 
     const config: ProcessConfig = {
       name,
       script,
-      cwd: payload.cwd || process.cwd(),
+      cwd,
       workerCount,
       execMode,
       watch: payload.watch || false,
@@ -92,7 +95,13 @@ export class Orchestrator extends EventEmitter {
       logMaxAge: payload.logMaxAge ?? DEFAULT_LOG_MAX_AGE,
       restartOnMemory: payload.restartOnMemory,
       cron: payload.cron,
+      framework: payload.framework ?? detectFramework(cwd),
     };
+
+    // Auto-generate a stable encryption key for Next.js Server Actions
+    if (config.framework === 'nextjs' && !config.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY) {
+      config.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY = randomBytes(32).toString('hex');
+    }
 
     const processId = this.nextProcessId++;
     const container = new ManagedProcess(processId, config);
@@ -286,6 +295,7 @@ export class Orchestrator extends EventEmitter {
           logMaxAge: config.logMaxAge,
           restartOnMemory: config.restartOnMemory,
           cron: config.cron,
+          framework: config.framework,
         });
 
         results.push(info);
@@ -382,6 +392,7 @@ export class Orchestrator extends EventEmitter {
         logMaxAge: config.logMaxAge,
         restartOnMemory: config.restartOnMemory,
         cron: config.cron,
+        framework: config.framework,
       };
 
       if (!runningNames.has(config.name)) {

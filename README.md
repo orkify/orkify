@@ -23,6 +23,7 @@ Modern JS process orchestration and deployment for your own infrastructure.
 - [Environment Variables](#environment-variables)
 - [Worker IPC (Broadcasting)](#worker-ipc-broadcasting)
 - [Shared Cluster Cache](#shared-cluster-cache)
+- [Next.js](#nextjs)
 - [Socket.IO / WebSocket Support](#socketio--websocket-support)
 - [Log Rotation](#log-rotation)
 - [Environment Files](#environment-files)
@@ -50,6 +51,7 @@ Modern JS process orchestration and deployment for your own infrastructure.
 - **Cron Scheduler** - Built-in cron that dispatches HTTP requests to managed processes on a schedule
 - **Native TypeScript** - Run `.ts` files directly with no build step (Node.js 22.18+)
 - **Shared Cluster Cache** - Built-in in-memory cache with zero-config cross-worker sync via IPC
+- **Next.js** - Auto-detection, `'use cache'` and ISR cache handlers, Server Actions encryption key, security header stripping (CVE-2025-29927), version skew protection, ISR request coalescing
 - **Modern Stack** - Pure ESM, TypeScript, Node.js 22.18+
 - **MCP Integration** - Built-in Model Context Protocol server for AI tool integration
 
@@ -482,6 +484,94 @@ cache.set('fn', () => {}); // Error
 ```
 
 Values can be any structured-cloneable type: plain objects, arrays, strings, numbers, booleans, `null`, `Map`, `Set`, `Date`, `RegExp`, `Error`, `ArrayBuffer`, and `TypedArray`. JSON-serializable values use JSON internally; complex types (Map, Set, Date, etc.) automatically use V8 serialization. Only functions and symbols are rejected.
+
+## Next.js
+
+orkify auto-detects Next.js apps (via `package.json` or `next.config.{ts,js,mjs}`) and provides production-grade hosting out of the box: cache handlers, security hardening, encryption key management, and deploy-time optimizations.
+
+### Setup
+
+```typescript
+// next.config.ts
+import type { NextConfig } from 'next';
+
+const nextConfig: NextConfig = {
+  // Next.js 16 'use cache' directives — backed by orkify/cache
+  cacheHandlers: {
+    default: require.resolve('orkify/next/use-cache'),
+  },
+
+  // ISR / route cache — backed by orkify/cache
+  cacheHandler: require.resolve('orkify/next/isr-cache'),
+
+  // Disable Next.js's built-in in-memory cache (orkify handles it)
+  cacheMaxMemorySize: 0,
+
+  // Version skew protection — auto-set by `orkify deploy`, optional for `orkify up/run`
+  deploymentId: process.env.NEXT_DEPLOYMENT_ID || undefined,
+};
+
+export default nextConfig;
+```
+
+### Cache Handlers
+
+orkify provides drop-in cache handlers for Next.js 16. Both use the same `orkify/cache` singleton, so tag invalidations propagate across all workers and affect both ISR and `'use cache'` entries.
+
+- **`orkify/next/use-cache`** — handles `'use cache'` directives. Converts between Next.js's stream-based interface and orkify's synchronous cache. Implements staleness checks (hard expiry, revalidation window, soft tags).
+- **`orkify/next/isr-cache`** — handles ISR / route cache. Simpler adapter: get, set, tag-based revalidation.
+
+Both work standalone (`npm run dev`) and in cluster mode — the cache detects the mode automatically.
+
+`revalidateTag()` calls in your Next.js app flow through orkify's cache, which broadcasts tag invalidations to all cluster workers via IPC:
+
+```typescript
+// app/actions.ts
+'use server';
+import { revalidateTag } from 'next/cache';
+
+export async function refreshPosts() {
+  revalidateTag('posts'); // invalidates across all workers
+}
+```
+
+### ISR Request Coalescing
+
+In cluster mode, multiple workers may detect the same stale cache entry simultaneously. Without coalescing, N workers trigger N parallel revalidations for the same page.
+
+orkify uses the shared cache as a distributed lock. When a worker detects staleness, it sets a short-lived `__revalidating:{key}` flag. Other workers seeing this flag serve stale content instead of triggering their own revalidation. The lock auto-expires after 30 seconds and is cleared when the fresh entry is stored.
+
+- Hard expiration: **not coalesced** (entry is genuinely expired, must be regenerated)
+- Soft tag invalidation: **not coalesced** (explicit invalidation should always miss)
+- Revalidation window: **coalesced** (stale-while-revalidate semantics)
+
+### Server Actions Encryption Key
+
+Next.js encrypts Server Action payloads. If the key differs between cluster workers or across rolling reloads, Server Actions fail with cryptic decryption errors. orkify auto-generates a stable `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` when it detects a Next.js app:
+
+- Generated once at process creation and stored in config
+- Consistent across all cluster workers (shared via `config.env`)
+- Survives reloads and daemon restarts (persisted in the snapshot file)
+- Skipped if you provide your own key via `--env` or shell environment
+
+### Security Header Stripping
+
+orkify strips dangerous headers from external requests before they reach your app:
+
+| Header                    | CVE                       | Risk                                       |
+| ------------------------- | ------------------------- | ------------------------------------------ |
+| `x-middleware-subrequest` | CVE-2025-29927 (CVSS 9.1) | Bypasses Next.js middleware authentication |
+| `x-now-route-matches`     | CVE-2024-46982            | Cache poisoning via Vercel routing         |
+
+Headers are preserved on loopback requests (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`) since Next.js uses them internally. Active in fork mode, cluster mode, and run mode with no configuration needed.
+
+### Version Skew Protection
+
+During `orkify deploy`, old and new workers coexist briefly. If client-side bundle hashes changed, a user who loaded a page from an old worker may request assets that only exist in the new version.
+
+orkify auto-sets `NEXT_DEPLOYMENT_ID` during deploy (format: `v{version}-{artifactSlice}`). Next.js uses this to tag asset URLs and handle version mismatches gracefully. The ID is passed to both the build command and runtime processes. If you set `NEXT_DEPLOYMENT_ID` in your secrets, orkify won't overwrite it.
+
+See [`examples/nextjs/`](examples/nextjs/) for a working example.
 
 ## Socket.IO / WebSocket Support
 
@@ -965,6 +1055,9 @@ deploy:
   install: npm ci
   build: npm run build
   crashWindow: 30
+  buildEnv:
+    NEXT_PUBLIC_API_URL: 'https://api.example.com'
+    NEXT_PUBLIC_SITE_NAME: 'My App'
 
 processes:
   - name: api
@@ -982,11 +1075,12 @@ The `deploy` section configures build/install steps. The `processes` section def
 
 ### Deploy Options
 
-| Field         | Description                                               |
-| ------------- | --------------------------------------------------------- |
-| `install`     | Install command (auto-detected: npm, yarn, pnpm, bun)     |
-| `build`       | Build command (optional, runs after install)              |
-| `crashWindow` | Seconds to monitor for crashes after deploy (default: 30) |
+| Field         | Description                                                                      |
+| ------------- | -------------------------------------------------------------------------------- |
+| `install`     | Install command (auto-detected: npm, yarn, pnpm, bun)                            |
+| `build`       | Build command (optional, runs after install)                                     |
+| `buildEnv`    | Build-time-only env vars (e.g. `NEXT_PUBLIC_*`). Not passed to runtime processes |
+| `crashWindow` | Seconds to monitor for crashes after deploy (default: 30)                        |
 
 ### Deploy Lifecycle
 
