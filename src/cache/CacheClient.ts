@@ -8,8 +8,10 @@ import type {
   CacheSetOptions,
   CacheSnapshotMessage,
   CacheStats,
+  ICacheStore,
 } from './types.js';
 import { CACHE_DEFAULT_MAX_VALUE_SIZE } from '../constants.js';
+import { CacheFileStore } from './CacheFileStore.js';
 import { CacheStore } from './CacheStore.js';
 import { serialize, serializedByteLength } from './serialize.js';
 
@@ -26,14 +28,33 @@ export class CacheClient {
   private defaultTtl: number | undefined;
   private maxValueSize: number;
   private messageHandler: ((msg: unknown) => void) | undefined;
-  private store: CacheStore;
+  private store: ICacheStore;
 
   constructor(config?: CacheConfig, bufferedMessages?: unknown[]) {
-    this.store = new CacheStore(config);
     this.defaultTtl = config?.defaultTtl;
     this.maxValueSize = config?.maxValueSize ?? CACHE_DEFAULT_MAX_VALUE_SIZE;
     this.clusterMode =
       process.env.ORKIFY_CLUSTER_MODE === 'true' && typeof process.send === 'function';
+
+    // File-backed: CacheFileStore for disk cold layer.
+    // In cluster mode workers are readOnly (reads from disk, writes go through IPC to primary).
+    // In standalone/fork mode the store has full read/write access.
+    const fileBacked = config?.fileBacked === true;
+    this.store = fileBacked
+      ? new CacheFileStore(
+          process.env.ORKIFY_PROCESS_NAME ?? 'default',
+          config,
+          this.clusterMode ? { readOnly: true } : undefined
+        )
+      : new CacheStore(config);
+
+    // In fork/standalone mode, flush file-backed cache on process exit so all
+    // entries (not just evicted ones) survive restarts. Uses synchronous I/O
+    // since the 'exit' event doesn't support async operations.
+    if (!this.clusterMode && fileBacked) {
+      const fileStore = this.store as CacheFileStore;
+      process.on('exit', () => fileStore.flushSync());
+    }
 
     if (this.clusterMode) {
       this.messageHandler = (msg: unknown) => this.handleMessage(msg);
@@ -45,11 +66,29 @@ export class CacheClient {
           this.handleMessage(msg);
         }
       }
+
+      // Notify the cluster primary about file-backed config so it can upgrade its store
+      if (process.send && fileBacked) {
+        this.trySend({
+          __orkify: true,
+          type: 'cache:configure',
+          config: { ...config, fileBacked: true },
+        });
+      }
     }
+  }
+
+  /** Configure cache options. Must be called before any other method. Intercepted by the proxy in `cache/index.ts`. */
+  configure(_config: CacheConfig): void {
+    throw new Error('orkify/cache: configure() must be called via the cache singleton proxy');
   }
 
   get<T>(key: string): T | undefined {
     return this.store.get<T>(key);
+  }
+
+  async getAsync<T>(key: string): Promise<T | undefined> {
+    return this.store.getAsync<T>(key);
   }
 
   set(key: string, value: unknown, opts?: CacheSetOptions): void {
@@ -69,26 +108,26 @@ export class CacheClient {
     const ttl = opts?.ttl ?? this.defaultTtl;
     const expiresAt = ttl ? Date.now() + ttl * 1000 : undefined;
     const tags = opts?.tags;
-    this.store.set(key, value, expiresAt, tags);
+    this.store.set(key, value, expiresAt, tags, byteLength);
 
-    if (this.clusterMode && process.send) {
-      process.send({ __orkify: true, type: 'cache:set', key, value, ttl, tags });
+    if (this.clusterMode) {
+      this.trySend({ __orkify: true, type: 'cache:set', key, value, ttl, tags });
     }
   }
 
   delete(key: string): void {
     this.store.delete(key);
 
-    if (this.clusterMode && process.send) {
-      process.send({ __orkify: true, type: 'cache:delete', key });
+    if (this.clusterMode) {
+      this.trySend({ __orkify: true, type: 'cache:delete', key });
     }
   }
 
   clear(): void {
     this.store.clear();
 
-    if (this.clusterMode && process.send) {
-      process.send({ __orkify: true, type: 'cache:clear' });
+    if (this.clusterMode) {
+      this.trySend({ __orkify: true, type: 'cache:clear' });
     }
   }
 
@@ -107,8 +146,8 @@ export class CacheClient {
   invalidateTag(tag: string): void {
     this.store.invalidateTag(tag);
 
-    if (this.clusterMode && process.send) {
-      process.send({ __orkify: true, type: 'cache:invalidate-tag', tag });
+    if (this.clusterMode) {
+      this.trySend({ __orkify: true, type: 'cache:invalidate-tag', tag });
     }
   }
 
@@ -116,8 +155,8 @@ export class CacheClient {
     const ts = timestamp ?? Date.now();
     this.store.applyTagTimestamp(tag, ts);
 
-    if (this.clusterMode && process.send) {
-      process.send({ __orkify: true, type: 'cache:update-tag-timestamp', tag, tagTimestamp: ts });
+    if (this.clusterMode) {
+      this.trySend({ __orkify: true, type: 'cache:update-tag-timestamp', tag, tagTimestamp: ts });
     }
   }
 
@@ -127,6 +166,15 @@ export class CacheClient {
       this.messageHandler = undefined;
     }
     this.store.destroy();
+  }
+
+  /** Send an IPC message to the cluster primary, silently ignoring failures (e.g. closed channel). */
+  private trySend(msg: Record<string, unknown>): void {
+    try {
+      process.send?.(msg);
+    } catch {
+      // IPC channel closed — primary died or worker is shutting down
+    }
   }
 
   private handleMessage(msg: unknown): void {

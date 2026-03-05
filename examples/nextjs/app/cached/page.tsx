@@ -20,6 +20,9 @@ export default async function CachedPage() {
     <main>
       <h1>Cached Page</h1>
       <p>
+        Rendered at: <strong>{new Date(data.timestamp).toISOString()}</strong>
+      </p>
+      <p>
         This page uses <code>&apos;use cache&apos;</code> with orkify as the cache handler.
       </p>
       <pre>{JSON.stringify(data, null, 2)}</pre>

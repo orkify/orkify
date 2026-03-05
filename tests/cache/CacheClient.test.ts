@@ -337,6 +337,28 @@ describe('CacheClient', () => {
       clusterClient.destroy();
     });
 
+    it('does not throw when process.send fails in cluster mode', () => {
+      process.env.ORKIFY_CLUSTER_MODE = 'true';
+      process.send = vi.fn(() => {
+        throw new Error('IPC channel closed');
+      });
+
+      const clusterClient = new CacheClient();
+
+      // All these should silently swallow the IPC error
+      expect(() => clusterClient.set('key', 'value')).not.toThrow();
+      expect(() => clusterClient.delete('key')).not.toThrow();
+      expect(() => clusterClient.clear()).not.toThrow();
+      expect(() => clusterClient.invalidateTag('tag')).not.toThrow();
+      expect(() => clusterClient.updateTagTimestamp('tag', 123)).not.toThrow();
+
+      // Local operations should still work
+      clusterClient.set('local', 'works');
+      expect(clusterClient.get('local')).toBe('works');
+
+      clusterClient.destroy();
+    });
+
     it('ignores buffered messages in standalone mode', () => {
       // standalone mode — bufferedMessages should be ignored
       const buffered = [{ __orkify: true, type: 'cache:set', key: 'x', value: 'y' }];
@@ -469,6 +491,67 @@ describe('CacheClient', () => {
 
       expect(clusterClient.getTagExpiration(['remote-tag'])).toBe(4242);
       clusterClient.destroy();
+    });
+  });
+
+  describe('configure()', () => {
+    it('throws when called directly on a CacheClient instance', () => {
+      expect(() => client.configure({ maxEntries: 100 })).toThrow(
+        'must be called via the cache singleton proxy'
+      );
+    });
+  });
+
+  describe('getAsync', () => {
+    it('getAsync() returns value from memory', async () => {
+      client.set('key', 'value');
+      const result = await client.getAsync<string>('key');
+      expect(result).toBe('value');
+    });
+
+    it('getAsync() returns undefined when not file-backed and not in memory', async () => {
+      const result = await client.getAsync<string>('missing');
+      expect(result).toBeUndefined();
+    });
+  });
+
+  describe('file-backed constructor', () => {
+    it('creates CacheFileStore when fileBacked is true', () => {
+      const fbClient = new CacheClient({ fileBacked: true });
+      fbClient.set('key', 'value');
+      expect(fbClient.get('key')).toBe('value');
+      fbClient.destroy();
+    });
+
+    it('sends cache:configure IPC in cluster mode when fileBacked', () => {
+      process.env.ORKIFY_CLUSTER_MODE = 'true';
+      const sendSpy = vi.fn();
+      process.send = sendSpy;
+
+      const fbClusterClient = new CacheClient({ fileBacked: true, maxEntries: 50 });
+
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          __orkify: true,
+          type: 'cache:configure',
+          config: expect.objectContaining({ fileBacked: true, maxEntries: 50 }),
+        })
+      );
+
+      fbClusterClient.destroy();
+    });
+
+    it('does not send cache:configure in standalone mode', () => {
+      const sendSpy = vi.fn();
+      process.send = sendSpy;
+
+      const fbClient = new CacheClient({ fileBacked: true });
+      // In standalone mode (ORKIFY_CLUSTER_MODE not 'true'), no IPC
+      expect(sendSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'cache:configure' })
+      );
+
+      fbClient.destroy();
     });
   });
 

@@ -4,3 +4,4 @@ node_modules/
 *.log
 examples/**/.next/
 examples/**/build-info.json
+examples/**/next-env.d.ts

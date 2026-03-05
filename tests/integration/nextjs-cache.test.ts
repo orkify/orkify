@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -22,6 +22,13 @@ function extractTimestamp(html: string): null | string {
 describe('Next.js Cache Handlers', () => {
   // Build the example app once before all tests
   beforeAll(async () => {
+    // Clean up stale processes from previous failed runs
+    try {
+      orkify(`delete ${APP_NAME}`);
+    } catch {
+      // ignore — process may not exist
+    }
+
     // Skip if example app hasn't been installed
     if (!existsSync(join(EXAMPLE_DIR, 'node_modules'))) {
       execSync('npm install', { cwd: EXAMPLE_DIR, stdio: 'pipe', timeout: 120_000 });
@@ -115,8 +122,9 @@ describe('Next.js Cache Handlers', () => {
   }, 15_000);
 
   it('cache survives orkify reload', async () => {
-    // Get ISR page (populates cache)
-    const { body: before } = await httpGet(`http://localhost:${PORT}/isr`);
+    // Use /cached (infinite cache, no revalidation window) so this test
+    // is immune to slow CI — timing can never cause a false negative.
+    const { body: before } = await httpGet(`http://localhost:${PORT}/cached`);
     const tsBefore = extractTimestamp(before);
     expect(tsBefore).toBeTruthy();
 
@@ -124,8 +132,8 @@ describe('Next.js Cache Handlers', () => {
     orkify(`reload ${APP_NAME}`);
     await waitForClusterReady(WORKERS, PORT, 60_000, '/api/health');
 
-    // ISR page should still serve the cached version
-    const { body: after } = await httpGet(`http://localhost:${PORT}/isr`);
+    // Cached page should still serve the same content after reload
+    const { body: after } = await httpGet(`http://localhost:${PORT}/cached`);
     const tsAfter = extractTimestamp(after);
 
     expect(tsAfter).toBe(tsBefore);
@@ -136,15 +144,15 @@ describe('Next.js Cache Handlers', () => {
     orkify(`down ${APP_NAME}`);
     await sleep(2000);
 
-    // Start standalone with Node directly
+    // Start standalone with Node directly (use spawn, not execSync)
     const standalonePort = 4221;
     const nextBin = join(EXAMPLE_DIR, 'node_modules/.bin/next');
-    execSync(`${nextBin} start -p ${standalonePort} &`, {
+    const child = spawn(nextBin, ['start', '-p', String(standalonePort)], {
       cwd: EXAMPLE_DIR,
-      stdio: 'pipe',
-      timeout: 10_000,
-      shell: '/bin/bash',
+      stdio: 'ignore',
+      detached: true,
     });
+    child.unref();
 
     try {
       await waitForHttpReady(`http://localhost:${standalonePort}/api/health`, 15_000);
@@ -155,14 +163,13 @@ describe('Next.js Cache Handlers', () => {
       expect(data.ok).toBe(true);
       expect(data.worker).toBe('standalone');
     } finally {
-      // Kill the standalone process
-      try {
-        execSync(`lsof -ti:${standalonePort} | xargs kill -9 2>/dev/null || true`, {
-          stdio: 'pipe',
-          shell: '/bin/bash',
-        });
-      } catch {
-        // ignore
+      // Kill the standalone process by PID (not lsof which can hit the test runner)
+      if (child.pid) {
+        try {
+          process.kill(-child.pid, 'SIGKILL'); // negative PID kills the process group
+        } catch {
+          // ignore — process may already be dead
+        }
       }
     }
   }, 30_000);

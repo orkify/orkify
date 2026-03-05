@@ -483,4 +483,135 @@ describe('CacheStore', () => {
       expect(store.stats().size).toBe(0);
     });
   });
+
+  describe('byte tracking', () => {
+    it('tracks totalBytes across set/delete/clear', () => {
+      store.set('a', 'hello');
+      const bytesA = store.stats().totalBytes;
+      expect(bytesA).toBeGreaterThan(0);
+
+      store.set('b', 'world');
+      const bytesAB = store.stats().totalBytes;
+      expect(bytesAB).toBeGreaterThan(bytesA);
+
+      store.delete('a');
+      expect(store.stats().totalBytes).toBe(bytesAB - bytesA);
+
+      store.clear();
+      expect(store.stats().totalBytes).toBe(0);
+    });
+
+    it('evicts by maxMemorySize when set', () => {
+      // Each entry ~5-7 bytes; set a very small maxMemorySize to force eviction
+      const small = new CacheStore({ maxEntries: 100, maxMemorySize: 20 });
+
+      small.set('a', 'hello');
+      vi.advanceTimersByTime(10);
+      small.set('b', 'world');
+      vi.advanceTimersByTime(10);
+
+      // Adding a third entry that pushes past 20 bytes should evict 'a'
+      small.set('c', 'foo!!');
+      expect(small.get('a')).toBeUndefined();
+      expect(small.stats().totalBytes).toBeLessThanOrEqual(20);
+
+      small.destroy();
+    });
+
+    it('evicts multiple entries to fit large new entry', () => {
+      const small = new CacheStore({ maxEntries: 100, maxMemorySize: 50 });
+
+      small.set('a', 'x');
+      vi.advanceTimersByTime(10);
+      small.set('b', 'y');
+      vi.advanceTimersByTime(10);
+      small.set('c', 'z');
+      vi.advanceTimersByTime(10);
+
+      // Large entry that requires evicting multiple small entries
+      small.set('big', 'a'.repeat(40));
+      expect(small.stats().totalBytes).toBeLessThanOrEqual(50);
+      expect(small.get('big')).toBe('a'.repeat(40));
+
+      small.destroy();
+    });
+
+    it('byte-based and entry-count limits work together', () => {
+      const small = new CacheStore({ maxEntries: 3, maxMemorySize: 1000 });
+
+      small.set('a', 'hello');
+      vi.advanceTimersByTime(10);
+      small.set('b', 'world');
+      vi.advanceTimersByTime(10);
+      small.set('c', 'third');
+      vi.advanceTimersByTime(10);
+
+      // Entry count limit (3) should trigger eviction even though byte limit is high
+      small.set('d', 'four');
+      expect(small.get('a')).toBeUndefined();
+      expect(small.stats().size).toBe(3);
+
+      small.destroy();
+    });
+
+    it('byteSize appears in stats()', () => {
+      store.set('key', 'hello');
+      const stats = store.stats();
+      expect(stats.totalBytes).toBeGreaterThan(0);
+      expect(typeof stats.totalBytes).toBe('number');
+    });
+  });
+
+  describe('precomputedByteSize', () => {
+    it('uses precomputedByteSize when provided', () => {
+      store.set('key', 'hello', undefined, undefined, 42);
+      // totalBytes should reflect the provided size, not the actual serialized size
+      expect(store.stats().totalBytes).toBe(42);
+    });
+
+    it('falls back to serialization when precomputedByteSize not provided', () => {
+      store.set('key', 'hello');
+      // Should compute size from serialization — will be > 0
+      expect(store.stats().totalBytes).toBeGreaterThan(0);
+    });
+  });
+
+  describe('onEvict callback', () => {
+    it('calls onEvict with lru reason on eviction', () => {
+      const evicted: Array<{ key: string; reason: string }> = [];
+      const small = new CacheStore({ maxEntries: 2 }, (key, _entry, reason) => {
+        evicted.push({ key, reason });
+      });
+
+      small.set('a', 1);
+      vi.advanceTimersByTime(10);
+      small.set('b', 2);
+      vi.advanceTimersByTime(10);
+
+      // This triggers eviction of 'a'
+      small.set('c', 3);
+      expect(evicted).toHaveLength(1);
+      expect(evicted[0]).toEqual({ key: 'a', reason: 'lru' });
+
+      small.destroy();
+    });
+
+    it('calls onEvict with expired reason on sweep', () => {
+      const evicted: Array<{ key: string; reason: string }> = [];
+      const s = new CacheStore({ maxEntries: 100 }, (key, _entry, reason) => {
+        evicted.push({ key, reason });
+      });
+
+      s.set('expires', 'val', Date.now() + 30_000);
+      s.set('stays', 'val2');
+
+      // Advance past TTL + sweep interval
+      vi.advanceTimersByTime(61_000);
+
+      expect(evicted).toHaveLength(1);
+      expect(evicted[0]).toEqual({ key: 'expires', reason: 'expired' });
+
+      s.destroy();
+    });
+  });
 });

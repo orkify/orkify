@@ -42,6 +42,8 @@ export class TelemetryReporter extends EventEmitter {
   private configStore: ConfigStore | null;
   private alertEvaluator: AlertEvaluator | null;
   private mcpCapable = false;
+  /** Previous cumulative cache counters per worker — keyed by "processName:workerId" */
+  private prevCacheCounters = new Map<string, { hits: number; misses: number }>();
 
   constructor(
     config: TelemetryConfig,
@@ -288,24 +290,44 @@ export class TelemetryReporter extends EventEmitter {
       processId: p.id,
       execMode: p.execMode,
       status: p.status,
-      workers: p.workers.map((w) => ({
-        id: w.id,
-        pid: w.pid,
-        cpu: w.cpu,
-        memory: w.memory,
-        uptime: w.uptime,
-        restarts: w.restarts,
-        crashes: w.crashes,
-        status: w.status,
-        stale: w.stale,
-        heapUsed: w.heapUsed,
-        heapTotal: w.heapTotal,
-        external: w.external,
-        arrayBuffers: w.arrayBuffers,
-        eventLoopLag: w.eventLoopLag,
-        eventLoopLagP95: w.eventLoopLagP95,
-        activeHandles: w.activeHandles,
-      })),
+      workers: p.workers.map((w) => {
+        const base = {
+          id: w.id,
+          pid: w.pid,
+          cpu: w.cpu,
+          memory: w.memory,
+          uptime: w.uptime,
+          restarts: w.restarts,
+          crashes: w.crashes,
+          status: w.status,
+          stale: w.stale,
+          heapUsed: w.heapUsed,
+          heapTotal: w.heapTotal,
+          external: w.external,
+          arrayBuffers: w.arrayBuffers,
+          eventLoopLag: w.eventLoopLag,
+          eventLoopLagP95: w.eventLoopLagP95,
+          activeHandles: w.activeHandles,
+        };
+        if (w.cacheSize === undefined) return base;
+
+        // Compute per-flush deltas for cumulative counters
+        const key = `${p.name}:${w.id}`;
+        const prev = this.prevCacheCounters.get(key);
+        const curHits = w.cacheHits ?? 0;
+        const curMisses = w.cacheMisses ?? 0;
+        const deltaHits = prev ? Math.max(0, curHits - prev.hits) : curHits;
+        const deltaMisses = prev ? Math.max(0, curMisses - prev.misses) : curMisses;
+        this.prevCacheCounters.set(key, { hits: curHits, misses: curMisses });
+
+        return {
+          ...base,
+          cacheSize: w.cacheSize,
+          cacheHits: deltaHits,
+          cacheMisses: deltaMisses,
+          cacheHitRate: w.cacheHitRate,
+        };
+      }),
       timestamp: now,
     }));
 

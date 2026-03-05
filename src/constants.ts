@@ -100,6 +100,16 @@ export type IPCMessageTypeType = (typeof IPCMessageType)[keyof typeof IPCMessage
 const METRICS_PROBE_SRC = `
 try {
   if (typeof process.send === "function") {
+    // Buffer IPC cache messages globally BEFORE any await so that snapshots
+    // sent on the 'online' event are captured even if cache/index.ts hasn't
+    // loaded yet. The CacheClient constructor drains this buffer on creation.
+    const _buf = globalThis.__orkifyCacheBuffer = [];
+    const _el = (msg) => {
+      if (msg?.__orkify && msg.type?.startsWith("cache:")) _buf.push(msg);
+    };
+    process.on("message", _el);
+    globalThis.__orkifyCacheBufferCleanup = () => process.removeListener("message", _el);
+
     const { monitorEventLoopDelay } = await import("node:perf_hooks");
     const { readFileSync } = await import("node:fs");
     const { createHash } = await import("node:crypto");
@@ -113,12 +123,23 @@ try {
     const t = setInterval(() => {
       try {
         const m = process.memoryUsage();
-        s({ __orkify: true, type: "metrics", data: {
+        const data = {
           heapUsed: m.heapUsed, heapTotal: m.heapTotal,
           external: m.external, arrayBuffers: m.arrayBuffers,
           eventLoopLag: h.mean / 1e6, eventLoopLagP95: h.percentile(95) / 1e6,
           activeHandles: process._getActiveHandles().length
-        }});
+        };
+        const _cacheStats = globalThis.__orkifyCacheStats;
+        if (typeof _cacheStats === "function") {
+          try {
+            const cs = _cacheStats();
+            data.cacheSize = cs.size;
+            data.cacheHits = cs.hits;
+            data.cacheMisses = cs.misses;
+            data.cacheHitRate = cs.hitRate;
+          } catch {}
+        }
+        s({ __orkify: true, type: "metrics", data });
         h.reset();
       } catch {}
     }, 2000);
@@ -275,6 +296,7 @@ export const ORKIFY_CONFIG_FILE = 'orkify.yml';
 // Cache
 export const CACHE_DIR = join(ORKIFY_HOME, 'cache');
 export const CACHE_DEFAULT_MAX_ENTRIES = 10_000;
+export const CACHE_DEFAULT_MAX_MEMORY_SIZE = 64 * 1024 * 1024; // 64 MB
 export const CACHE_DEFAULT_MAX_VALUE_SIZE = 1024 * 1024; // 1 MB
 export const CACHE_CLEANUP_INTERVAL = 60_000; // 60s
 

@@ -1,0 +1,3 @@
+module.exports=[33163,a=>{"use strict";var b=a.i(25646);function c({children:a}){return(0,b.jsx)("html",{lang:"en",children:(0,b.jsx)("body",{style:{fontFamily:"system-ui, sans-serif",padding:"2rem"},children:a})})}a.s(["default",()=>c,"metadata",0,{title:"orkify + Next.js ISR Example",description:"Demonstrates orkify isr-cache handler for Next.js"}])}];
+
+//# sourceMappingURL=examples_nextjs-isr_app_layout_tsx_4ae50c8e._.js.map

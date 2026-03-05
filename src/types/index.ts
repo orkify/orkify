@@ -52,6 +52,10 @@ export interface WorkerInfo {
   eventLoopLag?: number;
   eventLoopLagP95?: number;
   activeHandles?: number;
+  cacheSize?: number;
+  cacheHits?: number;
+  cacheMisses?: number;
+  cacheHitRate?: number;
 }
 
 export interface ProcessInfo {
@@ -234,6 +238,10 @@ export interface TelemetryMetricsSnapshot {
     eventLoopLag?: number;
     eventLoopLagP95?: number;
     activeHandles?: number;
+    cacheSize?: number;
+    cacheHits?: number;
+    cacheMisses?: number;
+    cacheHitRate?: number;
   }>;
   timestamp: number;
 }

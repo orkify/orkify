@@ -7,7 +7,7 @@ const REVALIDATING_TTL = 30; // seconds
 
 const handler: NextCacheHandler = {
   async get(cacheKey: string, softTags: string[]): Promise<NextCacheEntry | undefined> {
-    const stored = cache.get<StoredCacheEntry>(cacheKey);
+    const stored = await cache.getAsync<StoredCacheEntry>(cacheKey);
     if (!stored) return undefined;
 
     const now = Date.now();
@@ -36,7 +36,11 @@ const handler: NextCacheHandler = {
       return undefined;
     }
 
-    // Soft tag invalidation — not coalesced (explicit invalidation should always miss)
+    // Tag invalidation — not coalesced (explicit invalidation should always miss)
+    // Check both explicit tags (from cacheTag()) and soft tags (implicit route tags)
+    if (stored.tags.length > 0 && cache.getTagExpiration(stored.tags) > stored.timestamp) {
+      return undefined;
+    }
     if (softTags.length > 0 && cache.getTagExpiration(softTags) > stored.timestamp) {
       return undefined;
     }

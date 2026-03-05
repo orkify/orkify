@@ -89,12 +89,21 @@ function joinTreeViewLines(tableStr: string): string {
   return lines.join('\n');
 }
 
+function formatNumber(n: number): string {
+  return n.toLocaleString('en-US');
+}
+
 export function formatProcessTable(
   processes: ProcessInfo[],
-  options?: { showUser?: string; verbose?: boolean }
+  options?: { cache?: boolean; showUser?: string; verbose?: boolean }
 ): string {
   const includeUser = options?.showUser !== undefined;
   const verbose = options?.verbose ?? false;
+  const showCache = options?.cache ?? false;
+
+  // Only show cache columns if --cache flag is set AND at least one worker has cache data
+  const hasCacheData =
+    showCache && processes.some((p) => p.workers.some((w) => w.cacheSize !== undefined));
 
   const headers = [
     ...(includeUser ? [chalk.cyan('user')] : []),
@@ -108,6 +117,9 @@ export function formatProcessTable(
     chalk.cyan('port'),
     chalk.cyan('cpu'),
     chalk.cyan('mem'),
+    ...(hasCacheData
+      ? [chalk.cyan('size'), chalk.cyan('hits'), chalk.cyan('misses'), chalk.cyan('hit%')]
+      : []),
     chalk.cyan('uptime'),
   ];
 
@@ -131,6 +143,14 @@ export function formatProcessTable(
       const totalCrashes = proc.workers.reduce((sum, w) => sum + w.crashes, 0);
       const hasStale = proc.workers.some((w) => w.stale);
 
+      // Cache aggregates for cluster summary
+      const cacheWorkers = proc.workers.filter((w) => w.cacheSize !== undefined);
+      const totalCacheSize = cacheWorkers.reduce((s, w) => s + (w.cacheSize ?? 0), 0);
+      const totalCacheHits = cacheWorkers.reduce((s, w) => s + (w.cacheHits ?? 0), 0);
+      const totalCacheMisses = cacheWorkers.reduce((s, w) => s + (w.cacheMisses ?? 0), 0);
+      const totalCacheReqs = totalCacheHits + totalCacheMisses;
+      const aggHitRate = totalCacheReqs > 0 ? (totalCacheHits / totalCacheReqs) * 100 : 0;
+
       table.push([
         ...userCol,
         proc.id,
@@ -143,6 +163,16 @@ export function formatProcessTable(
         proc.port ?? chalk.gray('-'),
         formatCpu(avgCpu),
         formatMemory(totalMem),
+        ...(hasCacheData
+          ? cacheWorkers.length > 0
+            ? [
+                formatNumber(totalCacheSize),
+                formatNumber(totalCacheHits),
+                formatNumber(totalCacheMisses),
+                `${aggHitRate.toFixed(1)}%`,
+              ]
+            : [chalk.gray('-'), chalk.gray('-'), chalk.gray('-'), chalk.gray('-')]
+          : []),
         '-',
       ]);
 
@@ -164,6 +194,16 @@ export function formatProcessTable(
           '',
           formatCpu(worker.cpu),
           formatMemory(worker.memory),
+          ...(hasCacheData
+            ? worker.cacheSize !== undefined
+              ? [
+                  formatNumber(worker.cacheSize),
+                  formatNumber(worker.cacheHits ?? 0),
+                  formatNumber(worker.cacheMisses ?? 0),
+                  `${(worker.cacheHitRate ?? 0).toFixed(1)}%`,
+                ]
+              : [chalk.gray('-'), chalk.gray('-'), chalk.gray('-'), chalk.gray('-')]
+            : []),
           formatUptime(worker.uptime),
         ]);
       }
@@ -182,6 +222,16 @@ export function formatProcessTable(
         proc.port ?? chalk.gray('-'),
         formatCpu(worker?.cpu || 0),
         formatMemory(worker?.memory || 0),
+        ...(hasCacheData
+          ? worker?.cacheSize !== undefined
+            ? [
+                formatNumber(worker.cacheSize),
+                formatNumber(worker.cacheHits ?? 0),
+                formatNumber(worker.cacheMisses ?? 0),
+                `${(worker.cacheHitRate ?? 0).toFixed(1)}%`,
+              ]
+            : [chalk.gray('-'), chalk.gray('-'), chalk.gray('-'), chalk.gray('-')]
+          : []),
         worker ? formatUptime(worker.uptime) : '-',
       ]);
     }
@@ -192,12 +242,12 @@ export function formatProcessTable(
 
 export function renderProcessTable(
   processes: ProcessInfo[],
-  options?: { showUser?: string; verbose?: boolean }
+  options?: { cache?: boolean; showUser?: string; verbose?: boolean }
 ): void {
   console.log(formatProcessTable(processes, options));
 }
 
-async function followList(verbose: boolean): Promise<void> {
+async function followList(verbose: boolean, cache: boolean): Promise<void> {
   // Test daemon connectivity before entering the loop
   try {
     await daemonClient.request(IPCMessageType.LIST);
@@ -233,7 +283,7 @@ async function followList(verbose: boolean): Promise<void> {
       const tableStr =
         processes.length === 0
           ? chalk.gray('No processes running')
-          : formatProcessTable(processes, { verbose });
+          : formatProcessTable(processes, { verbose, cache });
 
       if (process.stdout.isTTY && prevLines > 0) {
         process.stdout.write(`\x1B[${prevLines}A\x1B[J`);
@@ -256,6 +306,7 @@ export const listCommand = new Command('list')
   .alias('status')
   .description('List all processes')
   .option('-v, --verbose', 'Show additional details including PIDs')
+  .option('-c, --cache', 'Show cache statistics (size, hits, misses, hit rate)')
   .option('-f, --follow', 'Live-update the process table (Ctrl+C to stop)')
   .option('--all-users', 'List processes from all users (requires sudo on Unix)')
   .action(async (options) => {
@@ -311,7 +362,7 @@ export const listCommand = new Command('list')
 
     // Follow mode — live-updating table
     if (options.follow) {
-      await followList(options.verbose ?? false);
+      await followList(options.verbose ?? false, options.cache ?? false);
       daemonClient.disconnect();
       return;
     }
@@ -328,7 +379,18 @@ export const listCommand = new Command('list')
           return;
         }
 
-        renderProcessTable(processes, { verbose: options.verbose });
+        renderProcessTable(processes, { verbose: options.verbose, cache: options.cache });
+
+        if (
+          options.cache &&
+          !processes.some((p) => p.workers.some((w) => w.cacheSize !== undefined))
+        ) {
+          console.log(
+            chalk.gray(
+              '\nNo active cache detected. Import orkify/cache in your app to enable cache statistics.'
+            )
+          );
+        }
       } else {
         console.error(chalk.red(`✗ Failed to list: ${response.error}`));
         process.exit(1);

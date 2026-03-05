@@ -22,12 +22,136 @@ function createTempDir(): string {
   return realpathSync(mkdtempSync(join(tmpdir(), 'orkify-cache-test-')));
 }
 
+/**
+ * Write a worker script with file-backed cache enabled and small limits
+ * to force eviction to disk. Includes /cache/get-async endpoint.
+ */
+function writeFileBackedWorkerScript(dir: string, port: number): string {
+  const scriptPath = join(dir, 'cache-fb-app.mjs');
+  writeFileSync(
+    scriptPath,
+    `import { createServer } from 'node:http';
+import { cache } from '${CACHE_MODULE}';
+
+// Small limits to force eviction to disk quickly
+cache.configure({ fileBacked: true, maxEntries: 5, maxMemorySize: 500 });
+
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+  const params = url.searchParams;
+  const wid = process.env.ORKIFY_WORKER_ID;
+
+  res.setHeader('Content-Type', 'application/json');
+
+  try {
+    if (url.pathname === '/cache/set') {
+      const opts = {};
+      if (params.has('ttl')) opts.ttl = Number(params.get('ttl'));
+      if (params.has('tag')) opts.tags = [params.get('tag')];
+      cache.set(params.get('key'), params.get('value'), opts);
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, worker: wid }));
+    } else if (url.pathname === '/cache/get') {
+      const value = cache.get(params.get('key'));
+      res.writeHead(200);
+      res.end(JSON.stringify({ value: value ?? null, worker: wid }));
+    } else if (url.pathname === '/cache/get-async') {
+      const value = await cache.getAsync(params.get('key'));
+      res.writeHead(200);
+      res.end(JSON.stringify({ value: value ?? null, worker: wid }));
+    } else if (url.pathname === '/cache/stats') {
+      res.writeHead(200);
+      res.end(JSON.stringify({ ...cache.stats(), worker: wid }));
+    } else if (url.pathname === '/cache/invalidate-tag') {
+      cache.invalidateTag(params.get('tag'));
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, worker: wid }));
+    } else if (url.pathname === '/health') {
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, worker: wid, pid: process.pid }));
+    } else {
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'not found' }));
+    }
+  } catch (e) {
+    res.writeHead(400);
+    res.end(JSON.stringify({ error: e.message, worker: wid }));
+  }
+});
+
+server.listen(${port});
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+`
+  );
+  return scriptPath;
+}
+
+/**
+ * Write a worker script with small memory limits but NO file-backed storage.
+ * Evicted entries are lost. Includes /cache/get-async endpoint for contrast testing.
+ */
+function writeSmallMemoryWorkerScript(dir: string, port: number): string {
+  const scriptPath = join(dir, 'cache-small-app.mjs');
+  writeFileSync(
+    scriptPath,
+    `import { createServer } from 'node:http';
+import { cache } from '${CACHE_MODULE}';
+
+// Same small limits as file-backed tests, but NO fileBacked — evictions are permanent
+cache.configure({ fileBacked: false, maxEntries: 5, maxMemorySize: 500 });
+
+const server = createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+  const params = url.searchParams;
+  const wid = process.env.ORKIFY_WORKER_ID;
+
+  res.setHeader('Content-Type', 'application/json');
+
+  try {
+    if (url.pathname === '/cache/set') {
+      const opts = {};
+      if (params.has('ttl')) opts.ttl = Number(params.get('ttl'));
+      if (params.has('tag')) opts.tags = [params.get('tag')];
+      cache.set(params.get('key'), params.get('value'), opts);
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, worker: wid }));
+    } else if (url.pathname === '/cache/get') {
+      const value = cache.get(params.get('key'));
+      res.writeHead(200);
+      res.end(JSON.stringify({ value: value ?? null, worker: wid }));
+    } else if (url.pathname === '/cache/get-async') {
+      const value = await cache.getAsync(params.get('key'));
+      res.writeHead(200);
+      res.end(JSON.stringify({ value: value ?? null, worker: wid }));
+    } else if (url.pathname === '/health') {
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, worker: wid, pid: process.pid }));
+    } else {
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'not found' }));
+    }
+  } catch (e) {
+    res.writeHead(400);
+    res.end(JSON.stringify({ error: e.message, worker: wid }));
+  }
+});
+
+server.listen(${port});
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+`
+  );
+  return scriptPath;
+}
+
 function writeWorkerScript(dir: string, port: number): string {
   const scriptPath = join(dir, 'cache-app.mjs');
   writeFileSync(
     scriptPath,
     `import { createServer } from 'node:http';
 import { cache } from '${CACHE_MODULE}';
+
+// Disable file-backed mode — these tests exercise the snapshot-based persistence path
+cache.configure({ fileBacked: false });
 
 const server = createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -778,5 +902,278 @@ describe('Cluster Cache', () => {
       const workers = await verifyAcrossWorkers(PORT, 'durable', 'persist-test');
       expect(workers.size).toBeGreaterThan(1);
     }, 90000);
+  });
+
+  describe('file-backed cache', () => {
+    const PORT = 4211;
+    const APP_NAME = 'test-cache-fb';
+    let tempDir: string;
+    let scriptPath: string;
+
+    beforeAll(() => {
+      tempDir = createTempDir();
+      scriptPath = writeFileBackedWorkerScript(tempDir, PORT);
+    });
+
+    afterAll(() => {
+      try {
+        orkify(`delete ${APP_NAME}`);
+      } catch {
+        // ignore
+      }
+      try {
+        orkify('kill --force');
+      } catch {
+        // ignore
+      }
+      const cacheDir = join(ORKIFY_HOME, 'cache');
+      rmSync(cacheDir, { recursive: true, force: true });
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('evicted entries are recoverable via getAsync', async () => {
+      orkify(`up ${scriptPath} -n ${APP_NAME} -w ${WORKERS}`);
+      await waitForClusterReady(WORKERS, PORT);
+
+      // Fill cache past the small limits (maxEntries: 5, maxMemorySize: 500)
+      // to force eviction to disk. Set entries with unique keys.
+      for (let i = 0; i < 8; i++) {
+        await httpGet(`http://localhost:${PORT}/cache/set?key=entry-${i}&value=val-${i}`);
+        await sleep(100);
+      }
+      await sleep(500);
+
+      // The earliest entries should have been evicted from memory
+      // Sync get may return null for evicted entries
+      const { body: syncBody } = await httpGet(`http://localhost:${PORT}/cache/get?key=entry-0`);
+      const syncResult = JSON.parse(syncBody);
+
+      // But getAsync should recover them from disk
+      const { body: asyncBody } = await httpGet(
+        `http://localhost:${PORT}/cache/get-async?key=entry-0`
+      );
+      const asyncResult = JSON.parse(asyncBody);
+
+      // If sync returned null (evicted), async should still find it on disk
+      if (syncResult.value === null) {
+        expect(asyncResult.value).toBe('val-0');
+      } else {
+        // Entry was still in memory — that's fine too, just verify it works
+        expect(asyncResult.value).toBe('val-0');
+      }
+
+      // Verify the latest entries are still in memory
+      const { body: latestBody } = await httpGet(`http://localhost:${PORT}/cache/get?key=entry-7`);
+      expect(JSON.parse(latestBody).value).toBe('val-7');
+    }, 60000);
+
+    it('survives orkify kill and restart', async () => {
+      // Ensure process is running (may already be from previous test)
+      try {
+        await httpGet(`http://localhost:${PORT}/health`);
+      } catch {
+        orkify(`up ${scriptPath} -n ${APP_NAME} -w ${WORKERS}`);
+        await waitForClusterReady(WORKERS, PORT);
+      }
+
+      // Set entries — some will be in memory, some evicted to disk
+      for (let i = 0; i < 8; i++) {
+        await httpGet(`http://localhost:${PORT}/cache/set?key=persist-${i}&value=pval-${i}`);
+        await sleep(100);
+      }
+      await sleep(500);
+
+      // Kill daemon gracefully — triggers flush of in-memory entries to disk
+      orkify('kill');
+      await waitForDaemonKilled(10000);
+
+      // Restart
+      orkify(`up ${scriptPath} -n ${APP_NAME} -w ${WORKERS}`);
+      await waitForClusterReady(WORKERS, PORT);
+
+      // Both early (evicted) and late (in-memory at kill) entries should be accessible
+      // via getAsync, since all were flushed to disk on shutdown
+      const { body: earlyBody } = await httpGet(
+        `http://localhost:${PORT}/cache/get-async?key=persist-0`
+      );
+      expect(JSON.parse(earlyBody).value).toBe('pval-0');
+
+      const { body: lateBody } = await httpGet(
+        `http://localhost:${PORT}/cache/get-async?key=persist-7`
+      );
+      expect(JSON.parse(lateBody).value).toBe('pval-7');
+    }, 90000);
+
+    it('tag invalidation clears disk entries', async () => {
+      // Ensure process is running
+      try {
+        await httpGet(`http://localhost:${PORT}/health`);
+      } catch {
+        orkify(`up ${scriptPath} -n ${APP_NAME} -w ${WORKERS}`);
+        await waitForClusterReady(WORKERS, PORT);
+      }
+
+      // Set tagged entries that will overflow to disk
+      for (let i = 0; i < 8; i++) {
+        await httpGet(
+          `http://localhost:${PORT}/cache/set?key=tagged-${i}&value=tv-${i}&tag=fb-group`
+        );
+        await sleep(100);
+      }
+      await sleep(500);
+
+      // Verify an evicted entry is on disk
+      const { body: beforeBody } = await httpGet(
+        `http://localhost:${PORT}/cache/get-async?key=tagged-0`
+      );
+      expect(JSON.parse(beforeBody).value).toBe('tv-0');
+
+      // Invalidate the tag — should clear both memory and disk
+      await httpGet(`http://localhost:${PORT}/cache/invalidate-tag?tag=fb-group`);
+      await sleep(500);
+
+      // All entries with that tag should be gone, even from disk
+      const { body: afterBody } = await httpGet(
+        `http://localhost:${PORT}/cache/get-async?key=tagged-0`
+      );
+      expect(JSON.parse(afterBody).value).toBeNull();
+
+      const { body: after7Body } = await httpGet(
+        `http://localhost:${PORT}/cache/get-async?key=tagged-7`
+      );
+      expect(JSON.parse(after7Body).value).toBeNull();
+    }, 60000);
+  });
+
+  describe('file-backed cache (fork mode)', () => {
+    const PORT = 4212;
+    const APP_NAME = 'test-cache-fb-fork';
+    let tempDir: string;
+    let scriptPath: string;
+
+    beforeAll(() => {
+      tempDir = createTempDir();
+      scriptPath = writeFileBackedWorkerScript(tempDir, PORT);
+    });
+
+    afterAll(() => {
+      try {
+        orkify(`delete ${APP_NAME}`);
+      } catch {
+        // ignore
+      }
+      try {
+        orkify('kill --force');
+      } catch {
+        // ignore
+      }
+      const cacheDir = join(ORKIFY_HOME, 'cache');
+      rmSync(cacheDir, { recursive: true, force: true });
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('evicted entries are recoverable via getAsync in fork mode', async () => {
+      orkify(`up ${scriptPath} -n ${APP_NAME}`);
+      await waitForProcessOnline(APP_NAME);
+      await waitForHttpReady(`http://localhost:${PORT}/health`);
+
+      // Fill cache past the small limits to force eviction to disk
+      for (let i = 0; i < 8; i++) {
+        await httpGet(`http://localhost:${PORT}/cache/set?key=fk-${i}&value=fv-${i}`);
+        await sleep(100);
+      }
+      await sleep(500);
+
+      // getAsync should recover evicted entries from disk
+      const { body } = await httpGet(`http://localhost:${PORT}/cache/get-async?key=fk-0`);
+      expect(JSON.parse(body).value).toBe('fv-0');
+
+      // Latest entries should still be in memory
+      const { body: latestBody } = await httpGet(`http://localhost:${PORT}/cache/get?key=fk-7`);
+      expect(JSON.parse(latestBody).value).toBe('fv-7');
+    }, 60000);
+
+    it('survives orkify kill and restart in fork mode', async () => {
+      // Ensure process is running
+      try {
+        await httpGet(`http://localhost:${PORT}/health`);
+      } catch {
+        orkify(`up ${scriptPath} -n ${APP_NAME}`);
+        await waitForProcessOnline(APP_NAME);
+        await waitForHttpReady(`http://localhost:${PORT}/health`);
+      }
+
+      // Set entries
+      for (let i = 0; i < 8; i++) {
+        await httpGet(`http://localhost:${PORT}/cache/set?key=fp-${i}&value=fpv-${i}`);
+        await sleep(100);
+      }
+      await sleep(500);
+
+      // Kill daemon — triggers flush
+      orkify('kill');
+      await waitForDaemonKilled(10000);
+
+      // Restart in fork mode
+      orkify(`up ${scriptPath} -n ${APP_NAME}`);
+      await waitForProcessOnline(APP_NAME);
+      await waitForHttpReady(`http://localhost:${PORT}/health`);
+
+      // Both early and late entries should be accessible via getAsync
+      const { body: earlyBody } = await httpGet(
+        `http://localhost:${PORT}/cache/get-async?key=fp-0`
+      );
+      expect(JSON.parse(earlyBody).value).toBe('fpv-0');
+
+      const { body: lateBody } = await httpGet(`http://localhost:${PORT}/cache/get-async?key=fp-7`);
+      expect(JSON.parse(lateBody).value).toBe('fpv-7');
+    }, 90000);
+  });
+
+  describe('without file-backed (evicted entries are lost)', () => {
+    const PORT = 4213;
+    const APP_NAME = 'test-cache-no-fb';
+    let tempDir: string;
+    let scriptPath: string;
+
+    beforeAll(async () => {
+      tempDir = createTempDir();
+      scriptPath = writeSmallMemoryWorkerScript(tempDir, PORT);
+      orkify(`up ${scriptPath} -n ${APP_NAME}`);
+      await waitForProcessOnline(APP_NAME);
+      await waitForHttpReady(`http://localhost:${PORT}/health`);
+    }, 60000);
+
+    afterAll(() => {
+      try {
+        orkify(`delete ${APP_NAME}`);
+      } catch {
+        // ignore
+      }
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('evicted entries are NOT recoverable without fileBacked', async () => {
+      // Fill cache past the small limits (same limits as file-backed tests)
+      for (let i = 0; i < 8; i++) {
+        await httpGet(`http://localhost:${PORT}/cache/set?key=nofb-${i}&value=nv-${i}`);
+        await sleep(100);
+      }
+      await sleep(500);
+
+      // Latest entries should be in memory
+      const { body: latestBody } = await httpGet(`http://localhost:${PORT}/cache/get?key=nofb-7`);
+      expect(JSON.parse(latestBody).value).toBe('nv-7');
+
+      // Early entries were evicted — getAsync can NOT recover them (no disk fallback)
+      const { body: asyncBody } = await httpGet(
+        `http://localhost:${PORT}/cache/get-async?key=nofb-0`
+      );
+      expect(JSON.parse(asyncBody).value).toBeNull();
+
+      // Sync get also returns null
+      const { body: syncBody } = await httpGet(`http://localhost:${PORT}/cache/get?key=nofb-0`);
+      expect(JSON.parse(syncBody).value).toBeNull();
+    }, 30000);
   });
 });

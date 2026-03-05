@@ -38,6 +38,10 @@ interface WorkerState {
   eventLoopLag: number;
   eventLoopLagP95: number;
   activeHandles: number;
+  cacheSize?: number;
+  cacheHits?: number;
+  cacheMisses?: number;
+  cacheHitRate?: number;
 }
 
 export class ManagedProcess extends EventEmitter {
@@ -71,7 +75,21 @@ export class ManagedProcess extends EventEmitter {
   private lastMemoryRestart = 0;
   private workerMemoryCooldowns = new Map<number, number>();
   private memoryRestartingWorkers = new Set<number>();
-  private forkStats = {
+  private forkStats: {
+    memory: number;
+    cpu: number;
+    heapUsed: number;
+    heapTotal: number;
+    external: number;
+    arrayBuffers: number;
+    eventLoopLag: number;
+    eventLoopLagP95: number;
+    activeHandles: number;
+    cacheSize?: number;
+    cacheHits?: number;
+    cacheMisses?: number;
+    cacheHitRate?: number;
+  } = {
     memory: 0,
     cpu: 0,
     heapUsed: 0,
@@ -224,6 +242,12 @@ export class ManagedProcess extends EventEmitter {
         this.forkStats.eventLoopLag = d.eventLoopLag ?? 0;
         this.forkStats.eventLoopLagP95 = d.eventLoopLagP95 ?? 0;
         this.forkStats.activeHandles = d.activeHandles ?? 0;
+        if (d.cacheSize !== undefined) {
+          this.forkStats.cacheSize = d.cacheSize;
+          this.forkStats.cacheHits = d.cacheHits;
+          this.forkStats.cacheMisses = d.cacheMisses;
+          this.forkStats.cacheHitRate = d.cacheHitRate;
+        }
         return;
       }
 
@@ -470,6 +494,12 @@ export class ManagedProcess extends EventEmitter {
             worker.eventLoopLag = metricsData.eventLoopLag ?? 0;
             worker.eventLoopLagP95 = metricsData.eventLoopLagP95 ?? 0;
             worker.activeHandles = metricsData.activeHandles ?? 0;
+            if (metricsData.cacheSize !== undefined) {
+              worker.cacheSize = metricsData.cacheSize;
+              worker.cacheHits = metricsData.cacheHits;
+              worker.cacheMisses = metricsData.cacheMisses;
+              worker.cacheHitRate = metricsData.cacheHitRate;
+            }
 
             // Recover from launch timeout: if a worker is sending metrics,
             // it's alive and its event loop is responsive. The 30s launch
@@ -985,6 +1015,12 @@ export class ManagedProcess extends EventEmitter {
           eventLoopLag: stats.eventLoopLag,
           eventLoopLagP95: stats.eventLoopLagP95,
           activeHandles: stats.activeHandles,
+          ...(stats.cacheSize !== undefined && {
+            cacheSize: stats.cacheSize,
+            cacheHits: stats.cacheHits,
+            cacheMisses: stats.cacheMisses,
+            cacheHitRate: stats.cacheHitRate,
+          }),
         });
       } else {
         // Process has stopped - still show worker entry for restart count
@@ -1020,6 +1056,12 @@ export class ManagedProcess extends EventEmitter {
           eventLoopLag: state.eventLoopLag,
           eventLoopLagP95: state.eventLoopLagP95,
           activeHandles: state.activeHandles,
+          ...(state.cacheSize !== undefined && {
+            cacheSize: state.cacheSize,
+            cacheHits: state.cacheHits,
+            cacheMisses: state.cacheMisses,
+            cacheHitRate: state.cacheHitRate,
+          }),
         });
       }
       workers.sort((a, b) => a.id - b.id);

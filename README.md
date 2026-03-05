@@ -330,53 +330,82 @@ import { cache } from 'orkify/cache';
 
 cache.set('user:123', userData, { ttl: 300 }); // write + broadcast
 cache.set('key', value, { ttl: 300, tags: ['group'] }); // with tags
-cache.get<User>('user:123'); // sync local read
+cache.get<User>('user:123'); // sync — in-memory only
+await cache.getAsync<User>('user:123'); // async — memory first, then disk
 cache.has('key'); // sync local check
 cache.delete('key'); // delete + broadcast
 cache.clear(); // clear + broadcast
 cache.invalidateTag('group'); // delete all tagged entries + record timestamp
 cache.getTagExpiration(['group']); // when was this tag last invalidated?
 cache.updateTagTimestamp('group'); // record timestamp without deleting entries
-cache.stats(); // { size, hits, misses, hitRate }
+cache.stats(); // { size, hits, misses, hitRate, totalBytes, diskSize }
 ```
+
+`get()` reads from memory only — always sync, zero overhead. `getAsync()` checks memory first, then falls back to disk if file-backed mode is enabled. Without file-backed mode, `getAsync()` is identical to `get()` (just wrapped in a resolved promise, no disk I/O).
 
 ### How It Works
 
-**Reads are always synchronous local Map lookups** — zero overhead, no IPC, no async. Writes broadcast to all workers via IPC so every worker converges to the same state.
+**Reads are always local** — `get()` is a synchronous Map lookup with zero overhead. Writes broadcast to all workers via IPC so every worker converges to the same state. Evicted entries spill to disk and can be recovered via `getAsync()`.
 
 | Mode                       | Behavior                                                |
 | -------------------------- | ------------------------------------------------------- |
-| `npm run dev` (standalone) | Local in-memory Map, no IPC                             |
-| `orkify up -w 1` (fork)    | Local in-memory Map, no IPC                             |
+| `npm run dev` (standalone) | Local cache + disk cold layer, no IPC                   |
+| `orkify up -w 1` (fork)    | Local cache + disk cold layer, no IPC                   |
 | `orkify up -w 4` (cluster) | Broadcast cache — writes sync via IPC, reads stay local |
-| `orkify run` (foreground)  | Local in-memory Map, no IPC                             |
+| `orkify run` (foreground)  | Local cache + disk cold layer, no IPC                   |
 
 The API is identical in every mode. In standalone or fork mode, it degrades gracefully to a plain local cache — no errors, no code changes needed. You can use `orkify/cache` during local development with `node app.js` or `npm run dev` and it works as a regular Map. Deploy with `orkify up -w 4` and the same code now syncs across workers automatically.
 
 ### Configuration
 
-Optional — call `configure()` before the first use of `cache`, or defaults apply:
+Optional — call `cache.configure()` before the first use of `cache`, or defaults apply:
 
 ```typescript
-import { cache, configure } from 'orkify/cache';
+import { cache } from 'orkify/cache';
 
-configure({
+cache.configure({
   maxEntries: 50_000, // default: 10,000
   defaultTtl: 300, // default: no expiry (seconds)
+  maxMemorySize: 100 * 1024 * 1024, // default: 64 MB per worker
   maxValueSize: 2 << 20, // default: 1 MB
 });
-
-cache.set('key', 'value'); // uses defaultTtl (300s)
-cache.set('key', 'value', { ttl: 60 }); // per-key ttl overrides defaultTtl
-cache.set('key', 'value', { ttl: 60, tags: ['group'] }); // with tags
 ```
 
-| Option         | Default                 | Description                                                                    |
-| -------------- | ----------------------- | ------------------------------------------------------------------------------ |
-| `maxEntries`   | `10,000`                | Maximum entries before LRU eviction kicks in                                   |
-| `defaultTtl`   | `undefined` (no expiry) | Default TTL in seconds for entries without an explicit `ttl`                   |
-| `maxValueSize` | `1,048,576` (1 MB)      | Maximum byte size of a single serialized value                                 |
-| `tags`         | `undefined`             | String tags for `set()` — used with `invalidateTag()` for grouped invalidation |
+| Option          | Default                 | Description                                                                    |
+| --------------- | ----------------------- | ------------------------------------------------------------------------------ |
+| `maxEntries`    | `10,000`                | Maximum entries before LRU eviction kicks in                                   |
+| `defaultTtl`    | `undefined` (no expiry) | Default TTL in seconds for entries without an explicit `ttl`                   |
+| `fileBacked`    | `true`                  | Persist evicted entries to disk, survive restarts, read via `getAsync()`       |
+| `maxMemorySize` | `67,108,864` (64 MB)    | Memory limit in bytes per worker for LRU eviction                              |
+| `maxValueSize`  | `1,048,576` (1 MB)      | Maximum byte size of a single serialized value                                 |
+| `tags`          | `undefined`             | String tags for `set()` — used with `invalidateTag()` for grouped invalidation |
+
+The cache is file-backed by default — evicted entries spill to disk and the cache survives restarts. The sync `get()` path is unaffected (pure Map lookup, zero disk I/O). Disk reads only happen on `getAsync()` for entries not in memory. To disable the disk layer: `cache.configure({ fileBacked: false })`.
+
+#### Sync vs Async Reads
+
+`get()` reads from memory only — always sync, always fast. `getAsync()` checks memory first, then falls back to disk for evicted entries:
+
+```typescript
+cache.set('key', 'value'); // stored in memory
+cache.get('key'); // sync — in-memory only
+await cache.getAsync('key'); // async — memory first, disk fallback
+
+// In async handlers, prefer getAsync to catch cold entries:
+app.get('/api/user/:id', async (req, res) => {
+  const key = `user:${req.params.id}`;
+  let user = await cache.getAsync<User>(key);
+
+  if (!user) {
+    user = await db.users.findById(req.params.id);
+    cache.set(key, user, { ttl: 300, tags: [`org:${user.orgId}`] });
+  }
+
+  res.json(user);
+});
+```
+
+With `fileBacked: false`, `getAsync()` behaves identically to `get()` — no disk I/O, just a resolved promise.
 
 ### Tag-Based Invalidation
 
@@ -456,7 +485,18 @@ In cluster mode, the cache persists across daemon restarts and stays in memory a
 
 Cache files are stored per process at `~/.orkify/cache/` as JSON. Tags and V8 types (Map, Set, Date, etc.) are preserved correctly across restarts.
 
-In standalone/fork mode, the cache lives only in memory. It's gone when the process exits.
+In standalone/fork mode, the cache persists to `~/.orkify/cache/<name>/` by default and survives restarts. Use `getAsync()` to access cold entries that may be on disk. With `fileBacked: false`, the cache lives only in memory — it's gone when the process exits.
+
+The disk layer (on by default) works as follows:
+
+- Entries evicted from memory spill to disk automatically (`~/.orkify/cache/<name>/entries/`)
+- On shutdown (`orkify kill`), remaining in-memory entries are flushed to disk
+- On startup, only the disk index is loaded — entries promote lazily to memory on access via `getAsync()`
+- Disk entries have their own TTL and tag expiration checks — stale entries are cleaned up on read and by periodic sweeps
+
+In **cluster mode**, the primary process owns the disk layer (reads and writes). Workers can read directly from disk files for fast cold reads without IPC. Writes still go through IPC to the primary.
+
+In **fork/standalone mode**, the single process owns the disk layer directly. On graceful shutdown, all in-memory entries are flushed to disk synchronously so the cache survives restarts.
 
 ### Consistency Model
 
@@ -464,8 +504,10 @@ The cache is **eventually consistent**. Other workers may read a stale value for
 
 ### Eviction
 
-- **LRU eviction**: When `maxEntries` is reached, the least recently accessed entry is evicted on the next write
+- **Entry-count LRU**: When `maxEntries` is reached, the least recently accessed entry is evicted on the next write
+- **Byte-based LRU**: Evicts by total memory usage (default 64 MB per worker) in addition to entry count
 - **TTL expiry**: Expired entries are cleaned up lazily on read and by a background sweep every 60 seconds
+- **Disk persistence**: Evicted entries persist on disk (by default) and are promoted back to memory on access via `getAsync()`
 - **Value size limit**: `set()` rejects values exceeding `maxValueSize` (default 1 MB) with a descriptive error
 
 ### Validation

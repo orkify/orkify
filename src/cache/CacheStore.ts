@@ -3,21 +3,35 @@ import type {
   CacheEntry,
   CacheSnapshot,
   CacheStats,
+  EvictReason,
+  ICacheStore,
   SerializedCacheEntry,
 } from './types.js';
-import { CACHE_CLEANUP_INTERVAL, CACHE_DEFAULT_MAX_ENTRIES } from '../constants.js';
+import {
+  CACHE_CLEANUP_INTERVAL,
+  CACHE_DEFAULT_MAX_ENTRIES,
+  CACHE_DEFAULT_MAX_MEMORY_SIZE,
+} from '../constants.js';
+import { serialize, serializedByteLength } from './serialize.js';
 
-export class CacheStore {
+export type OnEvictCallback = (key: string, entry: CacheEntry, reason: EvictReason) => void;
+
+export class CacheStore implements ICacheStore {
   private entries = new Map<string, CacheEntry>();
   private hits = 0;
   private maxEntries: number;
+  private maxMemorySize: number;
   private misses = 0;
+  private onEvict: OnEvictCallback | undefined;
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   private tagIndex = new Map<string, Set<string>>(); // tag → keys
   private tagTimestamps = new Map<string, number>(); // tag → epoch ms of last invalidation
+  totalBytes = 0;
 
-  constructor(config?: CacheConfig) {
+  constructor(config?: CacheConfig, onEvict?: OnEvictCallback) {
     this.maxEntries = config?.maxEntries ?? CACHE_DEFAULT_MAX_ENTRIES;
+    this.maxMemorySize = config?.maxMemorySize ?? CACHE_DEFAULT_MAX_MEMORY_SIZE;
+    this.onEvict = onEvict;
 
     this.sweepTimer = setInterval(() => this.sweep(), CACHE_CLEANUP_INTERVAL);
     this.sweepTimer.unref();
@@ -39,20 +53,34 @@ export class CacheStore {
     return entry.value as T;
   }
 
-  set(key: string, value: unknown, expiresAt?: number, tags?: string[]): void {
+  set(
+    key: string,
+    value: unknown,
+    expiresAt?: number,
+    tags?: string[],
+    precomputedByteSize?: number
+  ): void {
+    const byteSize = precomputedByteSize ?? serializedByteLength(serialize(value));
     const existing = this.entries.get(key);
     if (existing) {
-      // Remove old tag associations before overwriting
+      // Remove old tag associations and byte count before overwriting
       this.removeFromTagIndex(key, existing.tags);
-    } else if (this.entries.size >= this.maxEntries) {
-      this.evictLru();
+      this.totalBytes -= existing.byteSize;
     }
+
+    // Evict until we're under both limits (entry count for new keys, byte limit always)
+    while (this.overLimit(existing ? 0 : 1, byteSize)) {
+      if (!this.evictLru()) break; // nothing left to evict
+    }
+
     this.entries.set(key, {
+      byteSize,
       value,
       expiresAt,
       lastAccessedAt: Date.now(),
       tags,
     });
+    this.totalBytes += byteSize;
     if (tags) {
       this.addToTagIndex(key, tags);
     }
@@ -62,6 +90,7 @@ export class CacheStore {
     const entry = this.entries.get(key);
     if (!entry) return false;
     this.removeFromTagIndex(key, entry.tags);
+    this.totalBytes -= entry.byteSize;
     this.entries.delete(key);
     return true;
   }
@@ -70,6 +99,7 @@ export class CacheStore {
     this.entries.clear();
     this.tagIndex.clear();
     this.tagTimestamps.clear();
+    this.totalBytes = 0;
   }
 
   has(key: string): boolean {
@@ -89,6 +119,7 @@ export class CacheStore {
       hits: this.hits,
       misses: this.misses,
       hitRate: total === 0 ? 0 : this.hits / total,
+      totalBytes: this.totalBytes,
     };
   }
 
@@ -105,6 +136,7 @@ export class CacheStore {
       if (entry) {
         // Remove this key from all its other tag sets
         this.removeFromTagIndex(key, entry.tags, tag);
+        this.totalBytes -= entry.byteSize;
         this.entries.delete(key);
         deleted.push(key);
       }
@@ -131,6 +163,10 @@ export class CacheStore {
     this.tagTimestamps.set(tag, timestamp);
   }
 
+  async getAsync<T>(key: string): Promise<T | undefined> {
+    return this.get<T>(key);
+  }
+
   /** Apply a set from IPC — no broadcast triggered */
   applySet(key: string, value: unknown, expiresAt?: number, tags?: string[]): void {
     this.set(key, value, expiresAt, tags);
@@ -146,17 +182,21 @@ export class CacheStore {
     this.entries.clear();
     this.tagIndex.clear();
     this.tagTimestamps.clear();
+    this.totalBytes = 0;
     const now = Date.now();
     for (const [key, serialized] of snapshot.entries) {
       // Skip expired entries
       if (serialized.expiresAt !== undefined && serialized.expiresAt < now) continue;
       const tags = serialized.tags;
+      const byteSize = serializedByteLength(serialize(serialized.value));
       this.entries.set(key, {
+        byteSize,
         value: serialized.value,
         expiresAt: serialized.expiresAt,
         lastAccessedAt: now,
         tags,
       });
+      this.totalBytes += byteSize;
       if (tags) {
         this.addToTagIndex(key, tags);
       }
@@ -190,6 +230,7 @@ export class CacheStore {
     this.entries.clear();
     this.tagIndex.clear();
     this.tagTimestamps.clear();
+    this.totalBytes = 0;
   }
 
   /** Remove all expired entries */
@@ -197,13 +238,21 @@ export class CacheStore {
     const now = Date.now();
     for (const [key, entry] of this.entries) {
       if (entry.expiresAt !== undefined && entry.expiresAt < now) {
+        this.onEvict?.(key, entry, 'expired');
         this.removeEntry(key, entry);
       }
     }
   }
 
-  /** Evict the entry with the oldest lastAccessedAt */
-  private evictLru(): void {
+  /** Check if adding pendingEntries + pendingBytes would exceed limits */
+  private overLimit(pendingEntries: number, pendingBytes: number): boolean {
+    if (this.entries.size + pendingEntries > this.maxEntries) return true;
+    if (this.totalBytes + pendingBytes > this.maxMemorySize) return true;
+    return false;
+  }
+
+  /** Evict the entry with the oldest lastAccessedAt. Returns false if nothing to evict. */
+  private evictLru(): boolean {
     let oldestKey: string | undefined;
     let oldestTime = Infinity;
     for (const [key, entry] of this.entries) {
@@ -212,18 +261,21 @@ export class CacheStore {
         oldestKey = key;
       }
     }
-    if (oldestKey !== undefined) {
-      const entry = this.entries.get(oldestKey);
-      if (entry) {
-        this.removeFromTagIndex(oldestKey, entry.tags);
-      }
-      this.entries.delete(oldestKey);
+    if (oldestKey === undefined) return false;
+    const entry = this.entries.get(oldestKey);
+    if (entry) {
+      this.onEvict?.(oldestKey, entry, 'lru');
+      this.removeFromTagIndex(oldestKey, entry.tags);
+      this.totalBytes -= entry.byteSize;
     }
+    this.entries.delete(oldestKey);
+    return true;
   }
 
   /** Remove a key from the entries map and clean up its tag index entries */
   private removeEntry(key: string, entry: CacheEntry): void {
     this.removeFromTagIndex(key, entry.tags);
+    this.totalBytes -= entry.byteSize;
     this.entries.delete(key);
   }
 

@@ -23,12 +23,13 @@ orkify/
 │   │   └── AlertEvaluator.ts    # Alert rule evaluation
 │   ├── cache/
 │   │   ├── index.ts             # Lazy singleton proxy + early IPC buffer
-│   │   ├── CacheClient.ts       # Public API (get/set/delete/tags/stats)
+│   │   ├── CacheClient.ts       # Public API (get/set/delete/getAsync/tags/stats)
+│   │   ├── CacheFileStore.ts    # File-backed cold layer (disk read/write, promotion)
 │   │   ├── CachePrimary.ts      # Primary-side IPC handler + snapshots
-│   │   ├── CacheStore.ts        # In-memory store (LRU, TTL, tag index)
+│   │   ├── CacheStore.ts        # In-memory store (LRU, TTL, tag index, byte tracking)
 │   │   ├── CachePersistence.ts  # Disk save/load for daemon restarts
 │   │   ├── serialize.ts         # V8/JSON value serialization
-│   │   └── types.ts             # Cache types and IPC message interfaces
+│   │   └── types.ts             # Cache types, ICacheStore interface, IPC messages
 │   ├── cli/
 │   │   ├── index.ts             # Commander.js CLI setup
 │   │   └── commands/            # Individual command files
@@ -171,7 +172,9 @@ chore: update dependencies
 - `orkify/cache` exposes a shared cache singleton via a lazy Proxy
 - In cluster mode (`ORKIFY_CLUSTER_MODE=true` + `process.send`): writes broadcast via IPC through `CachePrimary`, reads are local Map lookups
 - In standalone/fork/run mode: plain local Map, no IPC
-- Features: LRU eviction, TTL, tag-based invalidation, tag timestamps, V8 serialization (Map/Set/Date)
+- Features: LRU eviction (entry-count and byte-based), TTL, tag-based invalidation, tag timestamps, V8 serialization (Map/Set/Date)
+- Two-tier architecture (`fileBacked: true`): in-memory hot layer + file-backed cold layer. Evicted entries spill to disk, promote back to memory via `getAsync()`. In cluster mode, only the primary does file I/O.
+- Config: `maxMemorySize` (bytes) enables byte-based LRU; `fileBacked` enables the cold disk layer
 - Snapshots sent to new workers on spawn; persisted to disk on `orkify kill` / `orkify daemon-reload`
 - Early IPC buffer in `cache/index.ts` captures messages before user code creates the CacheClient
 
@@ -221,19 +224,20 @@ npm run build
 
 ## Important Files
 
-| File                            | Purpose                                              |
-| ------------------------------- | ---------------------------------------------------- |
-| `src/daemon/Orchestrator.ts`    | Central orchestrator, handles all commands           |
-| `src/daemon/ManagedProcess.ts`  | Manages a single process (fork or cluster)           |
-| `src/cluster/ClusterWrapper.ts` | Cluster primary (workers, reload, sticky, cache IPC) |
-| `src/cache/CacheClient.ts`      | Public cache API used by application code            |
-| `src/cache/CachePrimary.ts`     | Primary-side cache: IPC handling, snapshots, persist |
-| `src/cache/CacheStore.ts`       | In-memory store with LRU, TTL, tags, timestamps      |
-| `src/ipc/DaemonClient.ts`       | CLI-side IPC, auto-starts daemon                     |
-| `src/ipc/DaemonServer.ts`       | Daemon-side IPC server                               |
-| `src/deploy/DeployExecutor.ts`  | Deployment orchestration (orkify.yml)                |
-| `src/next/use-cache.ts`         | Next.js 'use cache' handler (cacheHandlers)          |
-| `src/next/isr-cache.ts`         | Next.js ISR/route cache handler (cacheHandler)       |
+| File                            | Purpose                                                     |
+| ------------------------------- | ----------------------------------------------------------- |
+| `src/daemon/Orchestrator.ts`    | Central orchestrator, handles all commands                  |
+| `src/daemon/ManagedProcess.ts`  | Manages a single process (fork or cluster)                  |
+| `src/cluster/ClusterWrapper.ts` | Cluster primary (workers, reload, sticky, cache IPC)        |
+| `src/cache/CacheClient.ts`      | Public cache API used by application code                   |
+| `src/cache/CacheFileStore.ts`   | File-backed cold layer: disk I/O, promotion, eviction spill |
+| `src/cache/CachePrimary.ts`     | Primary-side cache: IPC handling, snapshots, persist        |
+| `src/cache/CacheStore.ts`       | In-memory store with LRU, TTL, tags, byte tracking          |
+| `src/ipc/DaemonClient.ts`       | CLI-side IPC, auto-starts daemon                            |
+| `src/ipc/DaemonServer.ts`       | Daemon-side IPC server                                      |
+| `src/deploy/DeployExecutor.ts`  | Deployment orchestration (orkify.yml)                       |
+| `src/next/use-cache.ts`         | Next.js 'use cache' handler (cacheHandlers)                 |
+| `src/next/isr-cache.ts`         | Next.js ISR/route cache handler (cacheHandler)              |
 
 ## Environment Variables Set for Managed Processes
 

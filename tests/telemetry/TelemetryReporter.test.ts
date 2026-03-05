@@ -307,6 +307,150 @@ describe('TelemetryReporter', () => {
     });
   });
 
+  describe('cache stats delta', () => {
+    it('sends per-flush deltas for cache hits and misses', async () => {
+      const processInfo: ProcessInfo = {
+        id: 0,
+        name: 'app',
+        script: '/app.js',
+        cwd: '/',
+        execMode: 'fork',
+        workerCount: 1,
+        status: 'online',
+        workers: [
+          {
+            id: 0,
+            pid: 5678,
+            status: 'online',
+            restarts: 0,
+            crashes: 0,
+            uptime: 10_000,
+            memory: 50_000_000,
+            cpu: 5,
+            createdAt: Date.now(),
+            cacheSize: 100,
+            cacheHits: 500,
+            cacheMisses: 50,
+            cacheHitRate: 90.9,
+          },
+        ],
+        createdAt: Date.now(),
+        watch: false,
+        sticky: false,
+      };
+
+      vi.mocked(orchestrator.list).mockReturnValue([processInfo]);
+      reporter.start();
+
+      // First flush — no previous values, sends full cumulative total
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const body1 = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body1.metrics[0].workers[0].cacheHits).toBe(500);
+      expect(body1.metrics[0].workers[0].cacheMisses).toBe(50);
+      expect(body1.metrics[0].workers[0].cacheSize).toBe(100);
+      expect(body1.metrics[0].workers[0].cacheHitRate).toBe(90.9);
+
+      // Simulate counter growth
+      processInfo.workers[0].cacheHits = 600;
+      processInfo.workers[0].cacheMisses = 70;
+
+      // Second flush — sends delta
+      fetchSpy.mockClear();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(fetchSpy).toHaveBeenCalledOnce();
+      const body2 = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body2.metrics[0].workers[0].cacheHits).toBe(100); // 600 - 500
+      expect(body2.metrics[0].workers[0].cacheMisses).toBe(20); // 70 - 50
+    });
+
+    it('resets delta on worker restart (counter drops)', async () => {
+      const processInfo: ProcessInfo = {
+        id: 0,
+        name: 'app',
+        script: '/app.js',
+        cwd: '/',
+        execMode: 'fork',
+        workerCount: 1,
+        status: 'online',
+        workers: [
+          {
+            id: 0,
+            pid: 5678,
+            status: 'online',
+            restarts: 0,
+            crashes: 0,
+            uptime: 10_000,
+            memory: 50_000_000,
+            cpu: 5,
+            createdAt: Date.now(),
+            cacheSize: 100,
+            cacheHits: 500,
+            cacheMisses: 50,
+            cacheHitRate: 90.9,
+          },
+        ],
+        createdAt: Date.now(),
+        watch: false,
+        sticky: false,
+      };
+
+      vi.mocked(orchestrator.list).mockReturnValue([processInfo]);
+      reporter.start();
+
+      // First flush
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      // Worker restarts — counters reset to lower values
+      processInfo.workers[0].cacheHits = 10;
+      processInfo.workers[0].cacheMisses = 2;
+
+      fetchSpy.mockClear();
+      await vi.advanceTimersByTimeAsync(10_000);
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      // Math.max(0, ...) clamps to 0 — sends 0 not a negative number
+      expect(body.metrics[0].workers[0].cacheHits).toBe(0);
+      expect(body.metrics[0].workers[0].cacheMisses).toBe(0);
+    });
+
+    it('omits cache fields when worker has no cache', async () => {
+      vi.mocked(orchestrator.list).mockReturnValue([
+        {
+          id: 0,
+          name: 'app',
+          script: '/app.js',
+          cwd: '/',
+          execMode: 'fork',
+          workerCount: 1,
+          status: 'online',
+          workers: [
+            {
+              id: 0,
+              pid: 5678,
+              status: 'online',
+              restarts: 0,
+              crashes: 0,
+              uptime: 10_000,
+              memory: 50_000_000,
+              cpu: 5,
+              createdAt: Date.now(),
+            },
+          ],
+          createdAt: Date.now(),
+          watch: false,
+          sticky: false,
+        },
+      ]);
+
+      reporter.start();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.metrics[0].workers[0].cacheSize).toBeUndefined();
+      expect(body.metrics[0].workers[0].cacheHits).toBeUndefined();
+    });
+  });
+
   describe('flush behavior', () => {
     it('POSTs to correct URL with auth header', async () => {
       reporter.start();
