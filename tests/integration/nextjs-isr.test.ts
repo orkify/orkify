@@ -35,7 +35,7 @@ describe('Next.js ISR Cache Handler (no cacheComponents)', () => {
     execSync('npm run build', { cwd: EXAMPLE_DIR, stdio: 'pipe', timeout: 120_000 });
 
     orkify(
-      `up ${join(EXAMPLE_DIR, 'node_modules/.bin/next')} -n ${APP_NAME} -w ${WORKERS} --cwd ${EXAMPLE_DIR} --args "start -p ${PORT}"`
+      `up ${join(EXAMPLE_DIR, 'node_modules', 'next', 'dist', 'bin', 'next')} -n ${APP_NAME} -w ${WORKERS} --cwd ${EXAMPLE_DIR} --args "start -p ${PORT}"`
     );
     await waitForClusterReady(WORKERS, PORT, 60_000, '/api/health');
   }, 180_000);

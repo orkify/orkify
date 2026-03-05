@@ -523,6 +523,57 @@ describe('CacheClient', () => {
       fbClient.destroy();
     });
 
+    it('registers IPC flush handler in standalone file-backed mode', () => {
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      const sendSpy = vi.fn();
+      process.send = sendSpy;
+
+      const fbClient = new CacheClient({ fileBacked: true });
+      fbClient.set('key', 'value');
+
+      // Simulate IPC flush message from parent
+      const handler = process.listeners('message').at(-1) as (msg: unknown) => void;
+      handler({ __orkify: true, type: 'cache:flush' });
+
+      expect(sendSpy).toHaveBeenCalledWith({ __orkify: true, type: 'cache:flushed' });
+      expect(exitSpy).toHaveBeenCalledWith(0);
+
+      exitSpy.mockRestore();
+      fbClient.destroy();
+    });
+
+    it('IPC flush handler ignores non-flush messages', () => {
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+      const fbClient = new CacheClient({ fileBacked: true });
+
+      const handler = process.listeners('message').at(-1) as (msg: unknown) => void;
+      handler({ __orkify: true, type: 'cache:set' });
+      handler({ type: 'unrelated' });
+      handler(null);
+
+      expect(exitSpy).not.toHaveBeenCalled();
+
+      exitSpy.mockRestore();
+      fbClient.destroy();
+    });
+
+    it('IPC flush handler tolerates send failure', () => {
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      process.send = () => {
+        throw new Error('IPC channel closed');
+      };
+
+      const fbClient = new CacheClient({ fileBacked: true });
+
+      const handler = process.listeners('message').at(-1) as (msg: unknown) => void;
+      expect(() => handler({ __orkify: true, type: 'cache:flush' })).not.toThrow();
+      expect(exitSpy).toHaveBeenCalledWith(0);
+
+      exitSpy.mockRestore();
+      fbClient.destroy();
+    });
+
     it('sends cache:configure IPC in cluster mode when fileBacked', () => {
       process.env.ORKIFY_CLUSTER_MODE = 'true';
       const sendSpy = vi.fn();

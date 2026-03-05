@@ -39,7 +39,7 @@ describe('Next.js Cache Handlers', () => {
 
     // Start with orkify in cluster mode
     orkify(
-      `up ${join(EXAMPLE_DIR, 'node_modules/.bin/next')} -n ${APP_NAME} -w ${WORKERS} --cwd ${EXAMPLE_DIR} --args "start -p ${PORT}"`
+      `up ${join(EXAMPLE_DIR, 'node_modules', 'next', 'dist', 'bin', 'next')} -n ${APP_NAME} -w ${WORKERS} --cwd ${EXAMPLE_DIR} --args "start -p ${PORT}"`
     );
     await waitForClusterReady(WORKERS, PORT, 60_000, '/api/health');
   }, 180_000);
@@ -146,8 +146,8 @@ describe('Next.js Cache Handlers', () => {
 
     // Start standalone with Node directly (use spawn, not execSync)
     const standalonePort = 4221;
-    const nextBin = join(EXAMPLE_DIR, 'node_modules/.bin/next');
-    const child = spawn(nextBin, ['start', '-p', String(standalonePort)], {
+    const nextBin = join(EXAMPLE_DIR, 'node_modules', 'next', 'dist', 'bin', 'next');
+    const child = spawn('node', [nextBin, 'start', '-p', String(standalonePort)], {
       cwd: EXAMPLE_DIR,
       stdio: 'ignore',
       detached: true,

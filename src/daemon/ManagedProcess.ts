@@ -844,7 +844,7 @@ export class ManagedProcess extends EventEmitter {
     }
 
     if (this.config.execMode === ExecMode.FORK) {
-      await this.stopFork();
+      await this.stopFork(opts);
     } else {
       await this.stopCluster(opts);
     }
@@ -887,7 +887,7 @@ export class ManagedProcess extends EventEmitter {
     this.errWriter?.end();
   }
 
-  private async stopFork(): Promise<void> {
+  private async stopFork(opts?: { persistCache?: boolean }): Promise<void> {
     const child = this.forkProcess;
     if (!child) return;
 
@@ -903,7 +903,25 @@ export class ManagedProcess extends EventEmitter {
         resolve();
       });
 
-      child.kill('SIGTERM');
+      if (opts?.persistCache && child.connected) {
+        const flushTimer = setTimeout(() => child.kill('SIGTERM'), 2000);
+
+        child.once('message', (msg: unknown) => {
+          const m = msg as { __orkify?: boolean; type?: string };
+          if (m?.__orkify && m.type === 'cache:flushed') {
+            clearTimeout(flushTimer);
+          }
+        });
+
+        try {
+          child.send({ __orkify: true, type: 'cache:flush' });
+        } catch {
+          clearTimeout(flushTimer);
+          child.kill('SIGTERM');
+        }
+      } else {
+        child.kill('SIGTERM');
+      }
     });
   }
 

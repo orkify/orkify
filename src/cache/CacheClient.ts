@@ -53,6 +53,23 @@ export class CacheClient {
     // since the 'exit' event doesn't support async operations.
     if (!this.clusterMode && fileBacked) {
       const fileStore = this.store as CacheFileStore;
+
+      // IPC flush for graceful shutdown (works cross-platform including Windows
+      // where SIGTERM doesn't trigger exit handlers)
+      process.on('message', (msg: unknown) => {
+        const m = msg as { __orkify?: boolean; type?: string };
+        if (m?.__orkify && m.type === 'cache:flush') {
+          fileStore.flushSync();
+          try {
+            process.send?.({ __orkify: true, type: 'cache:flushed' });
+          } catch {
+            // parent may have disconnected
+          }
+          process.exit(0);
+        }
+      });
+
+      // Fallback: also flush on exit event (works on Unix via SIGTERM → exit)
       process.on('exit', () => fileStore.flushSync());
     }
 

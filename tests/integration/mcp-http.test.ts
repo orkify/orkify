@@ -118,9 +118,11 @@ function orkifyTest(args: string, timeout = 30000): string {
 
 describe('MCP HTTP Server', () => {
   beforeAll(async () => {
-    // Kill any existing daemon
-    if (!IS_CI) {
+    // Kill any existing daemon so we start fresh with the correct HOME/USERPROFILE
+    try {
       orkify('kill');
+    } catch {
+      /* ignore */
     }
 
     // Create temp config at tmpDir/.orkify/mcp.yml (since HOME=tmpDir)
