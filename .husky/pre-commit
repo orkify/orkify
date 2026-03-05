@@ -1,1 +1,14 @@
+# Block build artifacts and other files that should never be committed
+STAGED=$(git diff --cached --name-only --diff-filter=ACR)
+if [ -n "$STAGED" ]; then
+  BLOCKED='(^|/)(\.next|dist|node_modules)/|\.tsbuildinfo$'
+  MATCHES=$(echo "$STAGED" | grep -E "$BLOCKED" || true)
+  if [ -n "$MATCHES" ]; then
+    echo "ERROR: Staged files match blocked patterns:"
+    echo "$MATCHES" | head -10
+    echo "Remove them with: git reset HEAD <file>"
+    exit 1
+  fi
+fi
+
 npx lint-staged
