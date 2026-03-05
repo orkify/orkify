@@ -1,8 +1,0 @@
-{
-  "/_global-error/page": "/_global-error",
-  "/_not-found/page": "/_not-found",
-  "/api/health/route": "/api/health",
-  "/api/revalidate/route": "/api/revalidate",
-  "/isr/page": "/isr",
-  "/page": "/"
-}
