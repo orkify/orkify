@@ -134,6 +134,7 @@ try {
           try {
             const cs = _cacheStats();
             data.cacheSize = cs.size;
+            data.cacheTotalBytes = cs.totalBytes;
             data.cacheHits = cs.hits;
             data.cacheMisses = cs.misses;
             data.cacheHitRate = cs.hitRate;

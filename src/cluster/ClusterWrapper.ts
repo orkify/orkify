@@ -68,8 +68,7 @@ let stickyServer: null | Server = null;
 const cachePrimary = new CachePrimary(PROCESS_NAME);
 
 function log(message: string): void {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] [${PROCESS_NAME}:primary] ${message}`);
+  console.log(message);
 }
 
 function setupCluster(): void {

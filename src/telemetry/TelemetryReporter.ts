@@ -323,6 +323,7 @@ export class TelemetryReporter extends EventEmitter {
         return {
           ...base,
           cacheSize: w.cacheSize,
+          cacheTotalBytes: w.cacheTotalBytes,
           cacheHits: deltaHits,
           cacheMisses: deltaMisses,
           cacheHitRate: w.cacheHitRate,

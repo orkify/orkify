@@ -53,6 +53,7 @@ export interface WorkerInfo {
   eventLoopLagP95?: number;
   activeHandles?: number;
   cacheSize?: number;
+  cacheTotalBytes?: number;
   cacheHits?: number;
   cacheMisses?: number;
   cacheHitRate?: number;
@@ -239,6 +240,7 @@ export interface TelemetryMetricsSnapshot {
     eventLoopLagP95?: number;
     activeHandles?: number;
     cacheSize?: number;
+    cacheTotalBytes?: number;
     cacheHits?: number;
     cacheMisses?: number;
     cacheHitRate?: number;

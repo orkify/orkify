@@ -7,12 +7,14 @@ declare const globalThis: {
     buildInfo: { version: string; builtAt: string; node: string };
     workerId: string;
     processName: string;
+    cacheStats: () => { size: number; hits: number; misses: number; hitRate: number };
   };
 };
 
 export function GET() {
   const app = globalThis.__app;
   const mem = process.memoryUsage();
+  const cs = app.cacheStats();
   return NextResponse.json({
     requests: app.requestCount,
     uptime: Math.floor((Date.now() - app.startedAt) / 1000),
@@ -22,5 +24,9 @@ export function GET() {
     worker: app.workerId,
     processName: app.processName,
     pid: process.pid,
+    cacheSize: cs.size,
+    cacheHits: cs.hits,
+    cacheMisses: cs.misses,
+    cacheHitRate: cs.hitRate,
   });
 }

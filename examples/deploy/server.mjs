@@ -10,6 +10,7 @@ import { createServer } from 'node:http';
 import { parse } from 'node:url';
 import { readFileSync, existsSync } from 'node:fs';
 import next from 'next';
+import { cache } from 'orkify/cache';
 
 const PORT = process.env.PORT || 3050;
 const WORKER_ID = process.env.ORKIFY_WORKER_ID || '0';
@@ -39,6 +40,7 @@ globalThis.__app = {
   workerId: WORKER_ID,
   processName: PROCESS_NAME,
   fakeLogs: true,
+  cacheStats: () => cache.stats(),
 };
 
 // ---------------------------------------------------------------------------
@@ -109,6 +111,46 @@ setInterval(() => {
     buffers[Math.floor(Math.random() * buffers.length)] = Buffer.alloc(64 * 1024, Math.random());
   }
 }, 3000);
+
+// ---------------------------------------------------------------------------
+// Background cache activity — simulates realistic cache usage so the dashboard
+// cache charts (activity, size, hit rate) have real data to display.
+// ---------------------------------------------------------------------------
+const CACHE_KEYS = Array.from({ length: 60 }, (_, i) => `item:${i}`);
+const CACHE_TAGS = ['user', 'product', 'session', 'config', 'search'];
+
+function backgroundCache() {
+  const action = Math.random();
+
+  if (action < 0.45) {
+    // SET — add or update a cache entry
+    const key = CACHE_KEYS[Math.floor(Math.random() * CACHE_KEYS.length)];
+    const ttl = Math.random() < 0.4 ? 5 + Math.floor(Math.random() * 25) : undefined;
+    const tags =
+      Math.random() < 0.5 ? [CACHE_TAGS[Math.floor(Math.random() * CACHE_TAGS.length)]] : undefined;
+    cache.set(key, { v: Math.random(), ts: Date.now() }, { ttl, tags });
+  } else if (action < 0.85) {
+    // GET — some hit, some miss
+    const key =
+      Math.random() < 0.7
+        ? CACHE_KEYS[Math.floor(Math.random() * CACHE_KEYS.length)]
+        : `miss:${Math.floor(Math.random() * 100)}`;
+    cache.get(key);
+  } else if (action < 0.95) {
+    // DELETE — remove a random entry
+    const key = CACHE_KEYS[Math.floor(Math.random() * CACHE_KEYS.length)];
+    cache.delete(key);
+  } else {
+    // INVALIDATE TAG — clears a batch of entries
+    const tag = CACHE_TAGS[Math.floor(Math.random() * CACHE_TAGS.length)];
+    cache.invalidateTag(tag);
+  }
+
+  const delay = 2000 + Math.random() * 2000;
+  setTimeout(backgroundCache, delay);
+}
+
+backgroundCache();
 
 // ---------------------------------------------------------------------------
 // Next.js server

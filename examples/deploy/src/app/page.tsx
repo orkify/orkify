@@ -11,6 +11,10 @@ interface Stats {
   worker: string;
   processName: string;
   pid: number;
+  cacheSize: number;
+  cacheHits: number;
+  cacheMisses: number;
+  cacheHitRate: number;
 }
 
 interface LogEntry {
@@ -199,10 +203,14 @@ export default function Dashboard() {
       </header>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-8">
         <StatCard label="Requests" value={stats?.requests ?? '—'} />
         <StatCard label="Memory" value={stats ? `${stats.memoryMB} MB` : '—'} />
         <StatCard label="Uptime" value={stats ? formatUptime(stats.uptime) : '—'} />
+        <StatCard
+          label="Cache"
+          value={stats ? `${stats.cacheSize} · ${Math.round(stats.cacheHitRate * 100)}%` : '—'}
+        />
         <StatCard
           label="Built"
           value={

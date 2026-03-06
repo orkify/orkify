@@ -39,6 +39,7 @@ interface WorkerState {
   eventLoopLagP95: number;
   activeHandles: number;
   cacheSize?: number;
+  cacheTotalBytes?: number;
   cacheHits?: number;
   cacheMisses?: number;
   cacheHitRate?: number;
@@ -86,6 +87,7 @@ export class ManagedProcess extends EventEmitter {
     eventLoopLagP95: number;
     activeHandles: number;
     cacheSize?: number;
+    cacheTotalBytes?: number;
     cacheHits?: number;
     cacheMisses?: number;
     cacheHitRate?: number;
@@ -244,6 +246,7 @@ export class ManagedProcess extends EventEmitter {
         this.forkStats.activeHandles = d.activeHandles ?? 0;
         if (d.cacheSize !== undefined) {
           this.forkStats.cacheSize = d.cacheSize;
+          this.forkStats.cacheTotalBytes = d.cacheTotalBytes;
           this.forkStats.cacheHits = d.cacheHits;
           this.forkStats.cacheMisses = d.cacheMisses;
           this.forkStats.cacheHitRate = d.cacheHitRate;
@@ -496,6 +499,7 @@ export class ManagedProcess extends EventEmitter {
             worker.activeHandles = metricsData.activeHandles ?? 0;
             if (metricsData.cacheSize !== undefined) {
               worker.cacheSize = metricsData.cacheSize;
+              worker.cacheTotalBytes = metricsData.cacheTotalBytes;
               worker.cacheHits = metricsData.cacheHits;
               worker.cacheMisses = metricsData.cacheMisses;
               worker.cacheHitRate = metricsData.cacheHitRate;
@@ -1035,6 +1039,7 @@ export class ManagedProcess extends EventEmitter {
           activeHandles: stats.activeHandles,
           ...(stats.cacheSize !== undefined && {
             cacheSize: stats.cacheSize,
+            cacheTotalBytes: stats.cacheTotalBytes,
             cacheHits: stats.cacheHits,
             cacheMisses: stats.cacheMisses,
             cacheHitRate: stats.cacheHitRate,
@@ -1076,6 +1081,7 @@ export class ManagedProcess extends EventEmitter {
           activeHandles: state.activeHandles,
           ...(state.cacheSize !== undefined && {
             cacheSize: state.cacheSize,
+            cacheTotalBytes: state.cacheTotalBytes,
             cacheHits: state.cacheHits,
             cacheMisses: state.cacheMisses,
             cacheHitRate: state.cacheHitRate,
