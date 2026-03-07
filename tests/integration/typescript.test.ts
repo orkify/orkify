@@ -78,7 +78,29 @@ describe('TypeScript support', () => {
 
     await waitForProcessOnline(forkName);
 
+    // Diagnostics: capture process state before HTTP request to debug Windows CI flakiness
+    const listBeforeHttp = orkify('list');
+    const logsBeforeHttp = orkify(`logs ${forkName} --lines 20`);
+
     const { status, body } = await httpGet(`http://localhost:${PORT_FORK}/`);
+    if (status !== 200) {
+      const listAfterHttp = orkify('list');
+      console.error('[TS fork diagnostics]');
+      console.error('List BEFORE http:', listBeforeHttp);
+      console.error('Logs BEFORE http:', logsBeforeHttp);
+      console.error('List AFTER http:', listAfterHttp);
+      console.error('HTTP status:', status, 'body:', body);
+
+      // Retry once after 1s to check if it's a timing issue
+      const { status: retryStatus, body: retryBody } = await new Promise<{
+        status: number;
+        body: string;
+      }>((resolve) =>
+        setTimeout(() => httpGet(`http://localhost:${PORT_FORK}/`).then(resolve), 1000)
+      );
+      console.error('Retry status:', retryStatus, 'body:', retryBody);
+      console.error('List AFTER retry:', orkify('list'));
+    }
     expect(status).toBe(200);
     const data = JSON.parse(body);
     expect(data.typescript).toBe(true);
