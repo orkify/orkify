@@ -8,6 +8,7 @@ export const DAEMON_PID_FILE = join(ORKIFY_HOME, 'daemon.pid');
 export const DAEMON_LOCK_FILE = join(ORKIFY_HOME, 'daemon.lock');
 export const DAEMON_LOG_FILE = join(ORKIFY_HOME, 'daemon.log');
 export const LOGS_DIR = join(ORKIFY_HOME, 'logs');
+export const AGENT_NAME_FILE = join(ORKIFY_HOME, 'agent-name');
 
 // IPC socket path - cross-platform (Unix sockets on Linux/macOS, Named Pipes on Windows)
 // Include username to support multi-user setups

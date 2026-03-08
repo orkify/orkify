@@ -16,6 +16,7 @@ import type {
   TelemetryMetricsSnapshot,
   TelemetryPayload,
 } from '../types/index.js';
+import { getAgentName } from '../agent-name.js';
 import {
   TELEMETRY_FLUSH_TIMEOUT,
   TELEMETRY_LOG_FLUSH_MAX_LINES,
@@ -25,6 +26,7 @@ import {
   TELEMETRY_METRICS_INTERVAL,
   TELEMETRY_REQUEST_TIMEOUT,
 } from '../constants.js';
+import { getMachineId } from '../machine-id.js';
 
 export class TelemetryReporter extends EventEmitter {
   private config: TelemetryConfig;
@@ -37,6 +39,8 @@ export class TelemetryReporter extends EventEmitter {
   private logFlushDropped = 0;
   private timer: null | ReturnType<typeof setInterval> = null;
   private hostName: string;
+  private agentName: string;
+  private machineId: null | string;
   private hostInfo: TelemetryHostInfo;
   private _deployStatus: DeployStatus | null = null;
   private configStore: ConfigStore | null;
@@ -57,6 +61,8 @@ export class TelemetryReporter extends EventEmitter {
     this.configStore = configStore ?? null;
     this.alertEvaluator = alertEvaluator ?? null;
     this.hostName = hostname();
+    this.agentName = getAgentName();
+    this.machineId = getMachineId();
     this.hostInfo = {
       os: platform(),
       arch: arch(),
@@ -361,6 +367,8 @@ export class TelemetryReporter extends EventEmitter {
       daemonPid: daemonStatus.pid,
       daemonUptime: daemonStatus.uptime,
       hostname: this.hostName,
+      agentName: this.agentName,
+      machineId: this.machineId,
       host: this.hostInfo,
       events: eventsToSend,
       metrics: metricsToSend,

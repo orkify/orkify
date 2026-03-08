@@ -377,6 +377,8 @@ export interface TelemetryPayload {
   daemonPid: number;
   daemonUptime: number;
   hostname: string;
+  agentName?: string;
+  machineId?: null | string;
   host: TelemetryHostInfo;
   events: TelemetryEvent[];
   metrics: TelemetryMetricsSnapshot[];

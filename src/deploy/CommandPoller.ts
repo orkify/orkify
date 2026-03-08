@@ -2,6 +2,7 @@ import { hostname } from 'node:os';
 import type { Orchestrator } from '../daemon/Orchestrator.js';
 import type { TelemetryReporter } from '../telemetry/TelemetryReporter.js';
 import type { DeployCommand, TelemetryConfig } from '../types/index.js';
+import { getAgentName } from '../agent-name.js';
 import { DeployExecutor } from './DeployExecutor.js';
 
 export class CommandPoller {
@@ -28,8 +29,9 @@ export class CommandPoller {
 
     try {
       const hn = hostname();
+      const agentName = getAgentName();
       const response = await fetch(
-        `${this.config.apiHost}/api/v1/deploy/commands?hostname=${encodeURIComponent(hn)}`,
+        `${this.config.apiHost}/api/v1/deploy/commands?hostname=${encodeURIComponent(hn)}&agentName=${encodeURIComponent(agentName)}`,
         {
           headers: { Authorization: `Bearer ${this.config.apiKey}` },
           signal: AbortSignal.timeout(10000),
