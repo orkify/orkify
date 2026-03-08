@@ -76,6 +76,10 @@ export class ManagedProcess extends EventEmitter {
   private lastMemoryRestart = 0;
   private workerMemoryCooldowns = new Map<number, number>();
   private memoryRestartingWorkers = new Set<number>();
+  // Ring buffer of recent stderr lines for crash diagnostics
+  private recentStderr: string[] = [];
+  private static readonly STDERR_BUFFER_SIZE = 10;
+
   private forkStats: {
     memory: number;
     cpu: number;
@@ -189,6 +193,7 @@ export class ManagedProcess extends EventEmitter {
 
     this.forkCreatedAt = Date.now();
     this.forkReady = false;
+    this.recentStderr = [];
     this.setupForkHandlers(this.forkProcess);
     this.startForkLaunchTimer();
   }
@@ -315,7 +320,12 @@ export class ManagedProcess extends EventEmitter {
 
         if (this.forkRestarts < this.config.maxRestarts) {
           if (uptime < this.config.minUptime) {
-            console.error(`[${this.config.name}] Process crashed after ${uptime}ms`);
+            const stderrContext = this.recentStderr.length
+              ? `\n  Last stderr:\n    ${this.recentStderr.join('\n    ')}`
+              : '';
+            console.error(
+              `[${this.config.name}] Process crashed after ${uptime}ms (exit code ${code ?? 'null'}, signal ${signal ?? 'none'})${stderrContext}`
+            );
           }
 
           this.forkRestarts++;
@@ -330,7 +340,10 @@ export class ManagedProcess extends EventEmitter {
             }
           }, backoffDelay);
         } else {
-          console.error(`[${this.config.name}] Max restarts exceeded`);
+          const stderrContext = this.recentStderr.length
+            ? `\n  Last stderr:\n    ${this.recentStderr.join('\n    ')}`
+            : '';
+          console.error(`[${this.config.name}] Max restarts exceeded${stderrContext}`);
           this.forkProcess = null;
           this.emit('worker:maxRestarts', 0);
           this.emit('process:finished', { code, signal });
@@ -393,6 +406,7 @@ export class ManagedProcess extends EventEmitter {
       windowsHide: true, // Hide subprocess console window on Windows
     } as Parameters<typeof fork>[2]);
 
+    this.recentStderr = [];
     this.setupClusterHandlers(this.clusterPrimary);
 
     // Wait for primary to be ready
@@ -574,8 +588,11 @@ export class ManagedProcess extends EventEmitter {
       if (!this.isShuttingDown) {
         this.primaryRestarts++;
         if (this.primaryRestarts <= this.config.maxRestarts) {
+          const stderrContext = this.recentStderr.length
+            ? `\n  Last stderr:\n    ${this.recentStderr.join('\n    ')}`
+            : '';
           console.error(
-            `[${this.config.name}] Cluster primary exited unexpectedly, restarting... (${this.primaryRestarts}/${this.config.maxRestarts})`
+            `[${this.config.name}] Cluster primary exited unexpectedly (exit code ${code ?? 'null'}, signal ${signal ?? 'none'}), restarting... (${this.primaryRestarts}/${this.config.maxRestarts})${stderrContext}`
           );
           const backoffDelay = Math.min(
             this.config.restartDelay * Math.pow(2, this.primaryRestarts - 1),
@@ -587,7 +604,12 @@ export class ManagedProcess extends EventEmitter {
             }
           }, backoffDelay);
         } else {
-          console.error(`[${this.config.name}] Cluster primary max restarts exceeded`);
+          const stderrContext = this.recentStderr.length
+            ? `\n  Last stderr:\n    ${this.recentStderr.join('\n    ')}`
+            : '';
+          console.error(
+            `[${this.config.name}] Cluster primary max restarts exceeded${stderrContext}`
+          );
           this.clusterPrimary = null;
           this.emit('worker:maxRestarts', -1);
           this.emit('process:finished', { code, signal });
@@ -706,6 +728,14 @@ export class ManagedProcess extends EventEmitter {
       this.outWriter?.write(logLine);
     } else {
       this.errWriter?.write(logLine);
+      // Buffer recent stderr for crash diagnostics
+      const trimmed = line.trimEnd();
+      if (trimmed) {
+        this.recentStderr.push(trimmed);
+        if (this.recentStderr.length > ManagedProcess.STDERR_BUFFER_SIZE) {
+          this.recentStderr.shift();
+        }
+      }
     }
 
     this.emit('log', { type, workerId, data: line });
