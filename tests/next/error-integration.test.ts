@@ -11,7 +11,6 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 let POST: (request: Request) => Promise<Response>;
-let getErrorToken: () => string;
 
 const mockSend = vi.fn();
 
@@ -19,7 +18,6 @@ beforeAll(async () => {
   vi.stubGlobal('process', { ...process, send: mockSend, cwd: process.cwd });
   const mod = await import('../../src/next/error-handler.js');
   POST = mod.POST;
-  getErrorToken = mod.getErrorToken;
 });
 
 beforeEach(() => {
@@ -27,14 +25,12 @@ beforeEach(() => {
 });
 
 function makeRequest(body: unknown): Request {
-  const token = getErrorToken();
   const json = JSON.stringify(body);
-  return new Request('http://localhost:3000/__orkify/errors', {
+  return new Request('http://localhost:3000/orkify/errors', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'content-length': String(Buffer.byteLength(json)),
-      'x-orkify-token': token,
       origin: 'http://localhost:3000',
       host: 'localhost:3000',
     },

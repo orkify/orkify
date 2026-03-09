@@ -95,7 +95,7 @@ describe('browser error capture', () => {
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url, opts] = fetchSpy.mock.calls[0];
-    expect(url).toBe('/__orkify/errors');
+    expect(url).toBe('/orkify/errors');
     expect(opts.method).toBe('POST');
     expect(opts.keepalive).toBe(true);
 
@@ -145,13 +145,7 @@ describe('browser error capture', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(10);
   });
 
-  it('OrkifyErrorCapture configures token in headers', async () => {
-    // We can't easily test the React component (needs React DOM renderer),
-    // but we can test that reportError uses the configured token by
-    // manually setting it via the component's module-level state.
-    // The component sets configuredToken in its useEffect.
-    // Instead, we test the OrkifyErrorCapture props interface exists
-    // and that the module exports are correct.
+  it('exports OrkifyErrorCapture, reportError, and normalizeStack', async () => {
     const mod = await import('../../src/next/error-capture.js');
     expect(typeof mod.OrkifyErrorCapture).toBe('function');
     expect(typeof mod.reportError).toBe('function');

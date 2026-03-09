@@ -7,6 +7,15 @@ const nextConfig: NextConfig = {
   experimental: {
     serverSourceMaps: true,
   },
+  // Generate source maps for client bundles so orkify can resolve minified
+  // browser stacks. 'hidden-source-map' produces .map files on disk without
+  // adding a sourceMappingURL comment, so browsers won't fetch them.
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.devtool = 'hidden-source-map';
+    }
+    return config;
+  },
 };
 
 export default nextConfig;

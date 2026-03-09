@@ -626,14 +626,13 @@ orkify captures unhandled browser errors (and unhandled promise rejections) and 
 ```typescript
 // app/layout.tsx
 import { OrkifyErrorCapture } from 'orkify/next/error-capture';
-import { getErrorToken } from 'orkify/next/error-handler';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html>
       <body>
         {children}
-        <OrkifyErrorCapture token={getErrorToken()} />
+        <OrkifyErrorCapture />
       </body>
     </html>
   );
@@ -641,7 +640,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 ```
 
 ```typescript
-// app/__orkify/errors/route.ts
+// app/orkify/errors/route.ts
 export { POST } from 'orkify/next/error-handler';
 ```
 
@@ -653,9 +652,19 @@ The `<OrkifyErrorCapture>` component listens for `error` and `unhandledrejection
 
 **Security.** The route handler enforces three layers of protection:
 
-- **HMAC token** — `getErrorToken()` generates a short-lived HMAC token at render time. The route handler rejects requests with missing or expired tokens.
-- **Rate limiting** — requests are rate-limited per IP to prevent abuse.
-- **Origin validation** — the handler checks the `Origin` header against the app's hostname, rejecting cross-origin submissions.
+- **Origin validation** — the handler requires the `Origin` header (which browsers always send on POST) and verifies it matches the app's hostname. This blocks cross-origin abuse and non-browser clients. Supports `X-Forwarded-Host` for reverse proxy setups.
+- **Rate limiting** — requests are rate-limited to 10 per 10 seconds per IP to prevent flooding.
+- **Payload validation** — strict Zod schema validation with size caps (64 KB body, 100 stack lines, field-level length limits).
+
+**Source maps.** By default, Next.js doesn't generate source maps for client bundles in production. To get resolved (non-minified) browser stacks, add `hidden-source-map` to your Next.js config — this produces `.map` files on disk without exposing them to browsers:
+
+```typescript
+// next.config.ts
+webpack: (config, { isServer }) => {
+  if (!isServer) config.devtool = 'hidden-source-map';
+  return config;
+},
+```
 
 **Error Boundary integration.** For errors caught by React Error Boundaries, use `reportError()` to forward them manually:
 

@@ -109,17 +109,19 @@ describe('Next.js Cache Handlers', () => {
   }, 15_000);
 
   it('cache works across workers', async () => {
-    // Hit the health endpoint multiple times to verify we reach different workers
+    // Hit the health endpoint many times to verify we reach different workers.
+    // Use enough requests so even slow CI runners distribute across workers.
     const workers = new Set<string>();
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 100; i++) {
       const { body } = await httpGet(`http://localhost:${PORT}/api/health`);
       const data = JSON.parse(body);
       workers.add(data.worker);
+      if (workers.size >= WORKERS) break;
     }
 
     // We should hit at least 2 different workers
     expect(workers.size).toBeGreaterThanOrEqual(WORKERS);
-  }, 15_000);
+  }, 30_000);
 
   it('cache survives orkify reload', async () => {
     // Use /cached (infinite cache, no revalidation window) so this test

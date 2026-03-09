@@ -1,11 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// We need to mock the signing key before importing the module.
-// The handler uses a random key per process, but we need a known key for testing.
-// Instead, we'll use the actual module and generate valid tokens via getErrorToken.
-
 let POST: (request: Request) => Promise<Response>;
-let getErrorToken: () => string;
 
 // Mock process.send
 const mockSend = vi.fn();
@@ -16,7 +11,6 @@ beforeAll(async () => {
 
   const mod = await import('../../src/next/error-handler.js');
   POST = mod.POST;
-  getErrorToken = mod.getErrorToken;
 });
 
 beforeEach(() => {
@@ -26,24 +20,25 @@ beforeEach(() => {
 function makeRequest(
   body: unknown,
   overrides?: {
-    token?: null | string;
-    origin?: string;
+    origin?: null | string;
     host?: string;
     forwardedHost?: string;
     contentLength?: string;
   }
 ): Request {
-  const token = overrides?.token === null ? undefined : (overrides?.token ?? getErrorToken());
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (token) headers['X-Orkify-Token'] = token;
-  if (overrides?.origin) headers['Origin'] = overrides.origin;
-  if (overrides?.host) headers['Host'] = overrides.host;
+  // Default: same-origin (browser always sends Origin on POST)
+  const origin =
+    overrides?.origin === null ? undefined : (overrides?.origin ?? 'http://localhost:3000');
+  if (origin) headers['Origin'] = origin;
+  const host = overrides?.host ?? 'localhost:3000';
+  if (host) headers['Host'] = host;
   if (overrides?.forwardedHost) headers['X-Forwarded-Host'] = overrides.forwardedHost;
   if (overrides?.contentLength) headers['Content-Length'] = overrides.contentLength;
 
-  return new Request('http://localhost:3000/__orkify/errors', {
+  return new Request('http://localhost:3000/orkify/errors', {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
@@ -64,31 +59,12 @@ function validPayload(overrides?: Record<string, unknown>) {
 }
 
 describe('POST handler', () => {
-  describe('authentication', () => {
-    it('rejects missing token with 401', async () => {
-      const res = await POST(makeRequest(validPayload(), { token: null }));
-      expect(res.status).toBe(401);
-    });
-
-    it('rejects invalid token with 401', async () => {
-      const res = await POST(
-        makeRequest(validPayload(), { token: '00000000000000000000000000000000' })
-      );
-      expect(res.status).toBe(401);
-    });
-
-    it('rejects wrong-length token with 401', async () => {
-      const res = await POST(makeRequest(validPayload(), { token: 'short' }));
-      expect(res.status).toBe(401);
-    });
-
-    it('accepts valid token', async () => {
-      const res = await POST(makeRequest(validPayload()));
-      expect(res.status).toBe(200);
-    });
-  });
-
   describe('origin validation', () => {
+    it('rejects missing origin with 403', async () => {
+      const res = await POST(makeRequest(validPayload(), { origin: null }));
+      expect(res.status).toBe(403);
+    });
+
     it('rejects mismatched origin', async () => {
       const res = await POST(
         makeRequest(validPayload(), {
@@ -140,12 +116,12 @@ describe('POST handler', () => {
     });
 
     it('rejects invalid JSON', async () => {
-      const token = getErrorToken();
-      const req = new Request('http://localhost:3000/__orkify/errors', {
+      const req = new Request('http://localhost:3000/orkify/errors', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Orkify-Token': token,
+          Origin: 'http://localhost:3000',
+          Host: 'localhost:3000',
         },
         body: 'not json',
       });
@@ -206,20 +182,6 @@ describe('POST handler', () => {
   });
 });
 
-describe('getErrorToken', () => {
-  it('returns a 32-char hex string', () => {
-    const token = getErrorToken();
-    expect(token).toHaveLength(32);
-    expect(token).toMatch(/^[0-9a-f]{32}$/);
-  });
-
-  it('returns same token within same hour slot', () => {
-    const t1 = getErrorToken();
-    const t2 = getErrorToken();
-    expect(t1).toBe(t2);
-  });
-});
-
 // Rate limit test uses a unique IP to avoid interference from prior tests.
 // The rate limiter keys by IP; X-Forwarded-For sets a custom IP.
 describe('rate limiting', () => {
@@ -227,13 +189,13 @@ describe('rate limiting', () => {
     const uniqueIp = `10.99.99.${Math.floor(Math.random() * 255)}`;
 
     function makeRateLimitRequest() {
-      const token = getErrorToken();
       const body = JSON.stringify(validPayload());
-      return new Request('http://localhost:3000/__orkify/errors', {
+      return new Request('http://localhost:3000/orkify/errors', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Orkify-Token': token,
+          Origin: 'http://localhost:3000',
+          Host: 'localhost:3000',
           'X-Forwarded-For': uniqueIp,
         },
         body,

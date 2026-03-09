@@ -17,13 +17,11 @@ interface PromiseRejectionEvent {
   reason: unknown;
 }
 
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 
 interface OrkifyErrorCaptureProps {
-  /** API route endpoint. Default: `/__orkify/errors` */
+  /** API route endpoint. Default: `/orkify/errors` */
   endpoint?: string;
-  /** HMAC token from `getErrorToken()`. Required for authenticated reporting. */
-  token?: string;
   /** Max errors to report per page load. Default: 10 */
   maxErrors?: number;
 }
@@ -64,8 +62,7 @@ export function normalizeStack(stack: string): string {
 // Module-level state for dedup and rate limiting
 const recentHashes = new Map<string, number>();
 let errorCount = 0;
-let configuredEndpoint = '/__orkify/errors';
-let configuredToken: string | undefined;
+let configuredEndpoint = '/orkify/errors';
 let configuredMax = 10;
 
 /** Flush expired dedup entries (older than 5 seconds). */
@@ -94,14 +91,9 @@ function sendError(
   recentHashes.set(hash, Date.now());
   errorCount++;
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (configuredToken) {
-    headers['X-Orkify-Token'] = configuredToken;
-  }
-
   void fetch(configuredEndpoint, {
     method: 'POST',
-    headers,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name,
       message,
@@ -137,25 +129,17 @@ export function reportError(error: unknown): void {
  *
  * ```tsx
  * import { OrkifyErrorCapture } from 'orkify/next/error-capture';
- * import { getErrorToken } from 'orkify/next/error-handler';
  *
- * <OrkifyErrorCapture token={getErrorToken()} />
+ * <OrkifyErrorCapture />
  * ```
  */
 export function OrkifyErrorCapture({
-  endpoint = '/__orkify/errors',
-  token,
+  endpoint = '/orkify/errors',
   maxErrors = 10,
 }: OrkifyErrorCaptureProps): null {
-  const initialized = useRef(false);
-
   useEffect(() => {
     configuredEndpoint = endpoint;
-    configuredToken = token;
     configuredMax = maxErrors;
-
-    if (initialized.current) return;
-    initialized.current = true;
 
     const onError = (event: ErrorEvent): void => {
       const err = event.error;
@@ -187,7 +171,7 @@ export function OrkifyErrorCapture({
       window.removeEventListener('error', onError);
       window.removeEventListener('unhandledrejection', onRejection);
     };
-  }, [endpoint, token, maxErrors]);
+  }, [endpoint, maxErrors]);
 
   return null;
 }

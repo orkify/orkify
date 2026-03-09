@@ -1,37 +1,7 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { parseBrowserFrames, type StackFrame } from '../probe/parse-frames.js';
 import { extractContext } from '../probe/resolve-sourcemaps.js';
-
-// ── HMAC Token ──────────────────────────────────────────────────────────
-
-/** Random signing key generated once per process start. Never exposed. */
-const signingKey = randomBytes(32);
-
-/**
- * Generate an HMAC token for the current hour.
- * Call from a server component and pass to `<OrkifyErrorCapture token={...} />`.
- */
-export function getErrorToken(): string {
-  const hourSlot = Math.floor(Date.now() / 3_600_000).toString();
-  return createHmac('sha256', signingKey).update(hourSlot).digest('hex').slice(0, 32);
-}
-
-function isValidToken(token: string): boolean {
-  if (token.length !== 32) return false;
-  const tokenBuf = Buffer.from(token, 'utf8');
-  const now = Math.floor(Date.now() / 3_600_000);
-  // Accept current hour and previous hour (handles boundary crossing)
-  for (const slot of [now, now - 1]) {
-    const expected = Buffer.from(
-      createHmac('sha256', signingKey).update(slot.toString()).digest('hex').slice(0, 32),
-      'utf8'
-    );
-    if (timingSafeEqual(tokenBuf, expected)) return true;
-  }
-  return false;
-}
 
 // ── Rate Limiter ────────────────────────────────────────────────────────
 
@@ -147,35 +117,25 @@ function getClientIp(request: Request): string {
 /**
  * Next.js API route handler for browser error reporting.
  *
- * Create `app/__orkify/errors/route.ts`:
+ * Create `app/orkify/errors/route.ts`:
  * ```ts
  * export { POST } from 'orkify/next/error-handler';
  * ```
  */
 export async function POST(request: Request): Promise<Response> {
   try {
-    // 1. Validate HMAC token
-    const token = request.headers.get('x-orkify-token');
-    if (!token || !isValidToken(token)) {
-      return Response.json({ ok: false }, { status: 401 });
-    }
-
-    // 2. Check content length
-    const contentLength = request.headers.get('content-length');
-    if (contentLength && parseInt(contentLength, 10) > MAX_BODY_SIZE) {
-      return Response.json({ ok: false }, { status: 413 });
-    }
-
-    // 3. Validate origin
-    // Behind reverse proxies (nginx, Cloudflare), Host may be the internal
-    // address while Origin is the public domain. X-Forwarded-Host carries the
-    // original Host header set by the proxy.
+    // 1. Validate origin — browsers always send Origin on POST requests.
+    //    This blocks cross-origin abuse and non-browser clients (curl/bots).
+    //    Behind reverse proxies (nginx, Cloudflare), Host may be internal
+    //    while Origin is public. X-Forwarded-Host carries the original Host.
     const origin = request.headers.get('origin');
+    if (!origin) {
+      return Response.json({ ok: false }, { status: 403 });
+    }
     const effectiveHost = request.headers.get('x-forwarded-host') || request.headers.get('host');
-    if (origin && effectiveHost) {
+    if (effectiveHost) {
       try {
         const originHost = new URL(origin).host;
-        // effectiveHost may include port (e.g. "example.com:443"), compare directly
         if (originHost !== effectiveHost) {
           return Response.json({ ok: false }, { status: 403 });
         }
@@ -184,13 +144,19 @@ export async function POST(request: Request): Promise<Response> {
       }
     }
 
-    // 4. Rate limit
+    // 2. Check content length
+    const contentLength = request.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > MAX_BODY_SIZE) {
+      return Response.json({ ok: false }, { status: 413 });
+    }
+
+    // 3. Rate limit
     const ip = getClientIp(request);
     if (isRateLimited(ip)) {
       return Response.json({ ok: false }, { status: 429 });
     }
 
-    // 5. Parse and validate body
+    // 4. Parse and validate body
     const raw = await request.text();
     if (raw.length > MAX_BODY_SIZE) {
       return Response.json({ ok: false }, { status: 413 });
@@ -210,22 +176,22 @@ export async function POST(request: Request): Promise<Response> {
 
     const data = parsed.data;
 
-    // 6. Truncate stack to max lines
+    // 5. Truncate stack to max lines
     const stackLines = data.stack.split('\n');
     const truncatedStack =
       stackLines.length > MAX_STACK_LINES
         ? stackLines.slice(0, MAX_STACK_LINES).join('\n')
         : data.stack;
 
-    // 7. Parse browser stack → frames, map URLs to file paths
+    // 6. Parse browser stack → frames, map URLs to file paths
     const cwd = process.cwd();
     const frames = parseBrowserFrames(truncatedStack, cwd);
 
-    // 8. Build source context from bundled files on disk
+    // 7. Build source context from bundled files on disk
     const sourceContext = frames.length > 0 ? buildSourceContext(frames) : null;
     const topFrame = frames[0] ?? null;
 
-    // 9. Relay to daemon via IPC
+    // 8. Relay to daemon via IPC
     if (typeof process.send === 'function') {
       process.send({
         __orkify: true,
