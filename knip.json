@@ -9,6 +9,6 @@
   ],
   "project": ["src/**/*.ts"],
   "ignore": ["src/types/**"],
-  "ignoreDependencies": ["@socket.io/sticky", "@socket.io/cluster-adapter", "socket.io"],
+  "ignoreDependencies": ["@socket.io/sticky", "@socket.io/cluster-adapter", "socket.io", "react"],
   "ignoreExportsUsedInFile": true
 }

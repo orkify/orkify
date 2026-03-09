@@ -266,6 +266,60 @@ export default function Dashboard() {
         </div>
       </section>
 
+      {/* Browser Error Triggers */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4">
+          Browser Error Triggers
+        </h2>
+        <p className="text-xs text-zinc-500 mb-3">
+          These throw errors in the browser. Captured by orkify/next/error-capture and relayed via
+          IPC.
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <ActionButton
+            label="window.onerror"
+            onClick={() => {
+              addLog('Triggering browser TypeError...', true);
+              setTimeout(() => {
+                const obj = null as unknown as { foo: string };
+                // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+                obj.foo;
+              }, 0);
+            }}
+            variant="red"
+          />
+          <ActionButton
+            label="Unhandled Rejection"
+            onClick={() => {
+              addLog('Triggering browser unhandled rejection...', true);
+              Promise.reject(new Error('Browser: unhandled promise rejection'));
+            }}
+            variant="orange"
+          />
+          <ActionButton
+            label="ReferenceError"
+            onClick={() => {
+              addLog('Triggering browser ReferenceError...', true);
+              setTimeout(() => {
+                // eslint-disable-next-line @typescript-eslint/no-implied-eval
+                new Function('return nonExistentVariable')();
+              }, 0);
+            }}
+            variant="yellow"
+          />
+          <ActionButton
+            label="RangeError"
+            onClick={() => {
+              addLog('Triggering browser RangeError...', true);
+              setTimeout(() => {
+                new Array(-1);
+              }, 0);
+            }}
+            variant="purple"
+          />
+        </div>
+      </section>
+
       {/* Log Controls */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4">

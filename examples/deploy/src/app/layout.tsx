@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+import { OrkifyErrorCapture } from 'orkify/next/error-capture';
+import { getErrorToken } from 'orkify/next/error-handler';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -9,7 +11,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
-      <body className="bg-zinc-950 text-zinc-100 antialiased">{children}</body>
+      <body className="bg-zinc-950 text-zinc-100 antialiased">
+        {children}
+        <OrkifyErrorCapture token={getErrorToken()} />
+      </body>
     </html>
   );
 }

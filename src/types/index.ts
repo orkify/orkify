@@ -290,7 +290,11 @@ export interface TelemetryErrorEvent {
   processName: string;
   workerId: number;
   timestamp: number;
-  errorType: 'uncaughtException' | 'unhandledRejection';
+  errorType:
+    | 'browser:error'
+    | 'browser:unhandledRejection'
+    | 'uncaughtException'
+    | 'unhandledRejection';
   name: string;
   message: string;
   stack: string;
@@ -302,6 +306,8 @@ export interface TelemetryErrorEvent {
   pid: number;
   lastLogs: string[];
   resolved?: boolean;
+  url?: string;
+  userAgent?: string;
 }
 
 export interface TelemetryLogEntry {

@@ -218,7 +218,7 @@ export class TelemetryReporter extends EventEmitter {
           processName: data.processName,
           workerId: data.workerId,
           timestamp: (err.timestamp as number) || Date.now(),
-          errorType: err.errorType as 'uncaughtException' | 'unhandledRejection',
+          errorType: err.errorType as TelemetryErrorEvent['errorType'],
           name: (err.name as string) || 'Error',
           message,
           stack: (err.stack as string) || '',
@@ -229,6 +229,8 @@ export class TelemetryReporter extends EventEmitter {
           nodeVersion: (err.nodeVersion as string) || '',
           pid: (err.pid as number) || 0,
           lastLogs,
+          url: (err.url as string) || undefined,
+          userAgent: (err.userAgent as string) || undefined,
         };
 
         // Resolve source maps for bundled/minified code

@@ -1,6 +1,11 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseUserFrames, type StackFrame } from '../../src/probe/parse-frames.js';
+import {
+  mapBrowserUrlToPath,
+  parseBrowserFrames,
+  parseUserFrames,
+  type StackFrame,
+} from '../../src/probe/parse-frames.js';
 
 const CWD = '/project';
 
@@ -171,6 +176,17 @@ describe('parseUserFrames', () => {
       expect(frames).toEqual([frame('/project/src/app.ts', 5, 1)]);
     });
 
+    it('skips invalid file:// URLs gracefully', () => {
+      const stack = [
+        'Error: bad url',
+        '    at run (file://not%a%valid%url:1:1)',
+        '    at main (/project/src/app.ts:5:1)',
+      ].join('\n');
+
+      const frames = parseUserFrames(stack, CWD);
+      expect(frames).toEqual([frame('/project/src/app.ts', 5, 1)]);
+    });
+
     it('skips http:// and https:// URLs', () => {
       const stack = [
         'Error: remote',
@@ -286,5 +302,179 @@ describe('parseUserFrames', () => {
         frame(resolve(CWD, './src/page.tsx'), 10, 7),
       ]);
     });
+  });
+});
+
+describe('mapBrowserUrlToPath', () => {
+  const CWD = '/app';
+
+  it('maps Next.js /_next/static/ URLs to .next/static/', () => {
+    const result = mapBrowserUrlToPath(
+      'http://localhost:3000/_next/static/chunks/app/page-abc.js',
+      CWD
+    );
+    expect(result).toBe(resolve(CWD, '.next/static/chunks/app/page-abc.js'));
+  });
+
+  it('maps generic paths against cwd', () => {
+    const result = mapBrowserUrlToPath('http://localhost:3000/assets/script.js', CWD);
+    expect(result).toBe(resolve(CWD, 'assets/script.js'));
+  });
+
+  it('returns null for data: URLs', () => {
+    expect(mapBrowserUrlToPath('data:text/javascript;base64,abc', CWD)).toBeNull();
+  });
+
+  it('returns null for blob: URLs', () => {
+    expect(mapBrowserUrlToPath('blob:http://localhost:3000/uuid', CWD)).toBeNull();
+  });
+
+  it('returns null for chrome-extension: URLs', () => {
+    expect(mapBrowserUrlToPath('chrome-extension://abc/content.js', CWD)).toBeNull();
+  });
+
+  it('returns null for invalid URLs', () => {
+    expect(mapBrowserUrlToPath('not-a-url', CWD)).toBeNull();
+  });
+
+  it('returns null for root path only', () => {
+    expect(mapBrowserUrlToPath('http://localhost:3000/', CWD)).toBeNull();
+  });
+
+  it('handles https URLs', () => {
+    const result = mapBrowserUrlToPath('https://myapp.com/_next/static/chunks/main.js', CWD);
+    expect(result).toBe(resolve(CWD, '.next/static/chunks/main.js'));
+  });
+});
+
+describe('parseBrowserFrames', () => {
+  const CWD = '/app';
+
+  it('parses Chrome V8 browser stack with http URLs', () => {
+    const stack = [
+      'TypeError: Cannot read properties of undefined',
+      '    at handleClick (http://localhost:3000/_next/static/chunks/app/page.js:42:15)',
+      '    at onClick (http://localhost:3000/_next/static/chunks/framework.js:100:20)',
+    ].join('\n');
+
+    const frames = parseBrowserFrames(stack, CWD);
+    expect(frames).toHaveLength(2);
+    expect(frames[0]).toEqual(frame(resolve(CWD, '.next/static/chunks/app/page.js'), 42, 15));
+    expect(frames[1]).toEqual(frame(resolve(CWD, '.next/static/chunks/framework.js'), 100, 20));
+  });
+
+  it('skips chrome-extension frames', () => {
+    const stack = [
+      'Error: test',
+      '    at ext (chrome-extension://abc/content.js:1:1)',
+      '    at handleClick (http://localhost:3000/_next/static/chunks/app.js:10:5)',
+    ].join('\n');
+
+    const frames = parseBrowserFrames(stack, CWD);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].line).toBe(10);
+  });
+
+  it('skips node_modules in resolved paths', () => {
+    const stack = [
+      'Error: lib',
+      '    at lib (http://localhost:3000/node_modules/react/index.js:1:1)',
+      '    at app (http://localhost:3000/_next/static/chunks/app.js:5:3)',
+    ].join('\n');
+
+    const frames = parseBrowserFrames(stack, CWD);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].line).toBe(5);
+  });
+
+  it('caps at 10 frames', () => {
+    const lines = ['Error: deep'];
+    for (let i = 1; i <= 20; i++) {
+      lines.push(`    at fn${i} (http://localhost:3000/_next/static/chunks/app.js:${i}:1)`);
+    }
+
+    const frames = parseBrowserFrames(lines.join('\n'), CWD);
+    expect(frames).toHaveLength(10);
+  });
+
+  it('handles empty stack', () => {
+    expect(parseBrowserFrames('', CWD)).toEqual([]);
+  });
+
+  it('handles https URLs', () => {
+    const stack = [
+      'Error: prod',
+      '    at handler (https://myapp.com/_next/static/chunks/main.js:50:10)',
+    ].join('\n');
+
+    const frames = parseBrowserFrames(stack, CWD);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toEqual(frame(resolve(CWD, '.next/static/chunks/main.js'), 50, 10));
+  });
+
+  it('handles absolute paths (non-URL frames) in browser stack', () => {
+    const stack = ['Error: test', '    at handler (/app/src/util.ts:5:3)'].join('\n');
+
+    const frames = parseBrowserFrames(stack, CWD);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toEqual(frame('/app/src/util.ts', 5, 3));
+  });
+
+  it('skips node: internals in absolute path frames', () => {
+    const stack = [
+      'Error: test',
+      '    at internal (node:internal/process:10:5)',
+      '    at handler (http://localhost:3000/_next/static/chunks/app.js:5:3)',
+    ].join('\n');
+
+    const frames = parseBrowserFrames(stack, CWD);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].line).toBe(5);
+  });
+
+  it('skips http URLs that map to null (root path)', () => {
+    const stack = [
+      'Error: test',
+      '    at handler (http://localhost:3000/:1:1)',
+      '    at app (http://localhost:3000/_next/static/chunks/app.js:5:3)',
+    ].join('\n');
+
+    const frames = parseBrowserFrames(stack, CWD);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].line).toBe(5);
+  });
+
+  it('skips node_modules in absolute path frames', () => {
+    const stack = [
+      'Error: test',
+      '    at lib (/app/node_modules/react/index.js:1:1)',
+      '    at handler (http://localhost:3000/_next/static/chunks/app.js:5:3)',
+    ].join('\n');
+
+    const frames = parseBrowserFrames(stack, CWD);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].line).toBe(5);
+  });
+
+  it('caps absolute path frames at 10', () => {
+    const lines = ['Error: deep'];
+    for (let i = 1; i <= 20; i++) {
+      lines.push(`    at fn${i} (/app/src/deep.ts:${i}:1)`);
+    }
+
+    const frames = parseBrowserFrames(lines.join('\n'), CWD);
+    expect(frames).toHaveLength(10);
+  });
+
+  it('skips data: URLs in browser stack', () => {
+    const stack = [
+      'Error: test',
+      '    at eval (data:text/javascript;base64,abc:1:1)',
+      '    at handler (http://localhost:3000/_next/static/chunks/app.js:5:3)',
+    ].join('\n');
+
+    const frames = parseBrowserFrames(stack, CWD);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].line).toBe(5);
   });
 });

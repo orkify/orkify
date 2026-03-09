@@ -68,7 +68,9 @@ orkify/
 │   │   ├── types.ts             # Next.js cache handler interfaces
 │   │   ├── stream.ts            # ReadableStream ↔ Buffer utilities
 │   │   ├── use-cache.ts         # 'use cache' handler (cacheHandlers)
-│   │   └── isr-cache.ts         # ISR/route cache handler (cacheHandler)
+│   │   ├── isr-cache.ts         # ISR/route cache handler (cacheHandler)
+│   │   ├── error-capture.ts     # Browser error capture component ('use client')
+│   │   └── error-handler.ts     # Browser error API route handler
 │   ├── probe/
 │   │   └── parse-frames.ts      # Metrics probe frame parsing
 │   ├── state/
@@ -187,6 +189,15 @@ chore: update dependencies
 - Work standalone and in cluster mode — the cache handles mode detection automatically
 - Example app: `examples/nextjs/`
 
+### Browser Error Tracking
+
+- `orkify/next/error-capture` — `'use client'` component that captures `window.onerror` and `unhandledrejection`, normalizes Firefox/Safari stacks to V8 format, and POSTs to the app's error handler route
+- `orkify/next/error-handler` — Next.js API route handler with HMAC auth, rate limiting, origin validation; parses browser stacks, builds source context, and relays errors to the daemon via `process.send()`
+- Errors flow through the same IPC path as server errors (fork mode: direct `process.send`, cluster mode: via ClusterWrapper)
+- Bundled with the regular telemetry flush — zero additional ingest calls
+- Optional: if the component and route aren't added, nothing changes
+- Example: `examples/deploy/` includes browser error trigger buttons
+
 ### IPC Protocol
 
 - JSON messages delimited by newlines
@@ -238,6 +249,8 @@ npm run build
 | `src/deploy/DeployExecutor.ts`  | Deployment orchestration (orkify.yml)                       |
 | `src/next/use-cache.ts`         | Next.js 'use cache' handler (cacheHandlers)                 |
 | `src/next/isr-cache.ts`         | Next.js ISR/route cache handler (cacheHandler)              |
+| `src/next/error-capture.ts`     | Browser error capture component ('use client')              |
+| `src/next/error-handler.ts`     | Browser error API route handler (HMAC, rate limit, IPC)     |
 
 ## Environment Variables Set for Managed Processes
 

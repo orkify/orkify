@@ -20,6 +20,16 @@
       "types": "./dist/next/isr-cache.d.ts",
       "import": "./dist/next/isr-cache.js",
       "default": "./dist/next/isr-cache.js"
+    },
+    "./next/error-capture": {
+      "types": "./dist/next/error-capture.d.ts",
+      "import": "./dist/next/error-capture.js",
+      "default": "./dist/next/error-capture.js"
+    },
+    "./next/error-handler": {
+      "types": "./dist/next/error-handler.d.ts",
+      "import": "./dist/next/error-handler.js",
+      "default": "./dist/next/error-handler.js"
     }
   },
   "bin": {
@@ -101,6 +111,14 @@
     "yaml": "^2.8.2",
     "zod": "^3.22.0"
   },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@commitlint/cli": "^20.3.1",
     "@commitlint/config-conventional": "^20.3.1",
@@ -108,6 +126,7 @@
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
     "@types/pidusage": "^2.0.5",
+    "@types/react": "^19.2.14",
     "@types/tar-stream": "^3.1.4",
     "@vitest/coverage-v8": "^4.0.18",
     "eslint": "^10.0.0",
@@ -117,6 +136,7 @@
     "knip": "^5.82.1",
     "lint-staged": "^16.2.7",
     "prettier": "^3.3.0",
+    "react": "^19.2.4",
     "socket.io-client": "^4.8.3",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.56.0",

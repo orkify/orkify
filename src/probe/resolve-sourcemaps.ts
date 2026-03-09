@@ -142,7 +142,7 @@ function resolveDisplayPath(cleanSource: string, mapDir: string): string {
 /**
  * Extract source context (pre/target/post lines) from source content.
  */
-function extractContext(
+export function extractContext(
   source: string,
   line: number
 ): null | { pre: string[]; target: string; post: string[] } {

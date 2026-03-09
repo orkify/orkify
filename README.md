@@ -617,6 +617,59 @@ During `orkify deploy`, old and new workers coexist briefly. If client-side bund
 
 orkify auto-sets `NEXT_DEPLOYMENT_ID` during deploy (format: `v{version}-{artifactSlice}`). Next.js uses this to tag asset URLs and handle version mismatches gracefully. The ID is passed to both the build command and runtime processes. If you set `NEXT_DEPLOYMENT_ID` in your secrets, orkify won't overwrite it.
 
+### Frontend Error Tracking
+
+orkify captures unhandled browser errors (and unhandled promise rejections) and relays them to the daemon via IPC. Errors are bundled into the regular telemetry ingest — no additional API calls are made.
+
+**Setup** requires two pieces: a client component in your root layout and a route handler.
+
+```typescript
+// app/layout.tsx
+import { OrkifyErrorCapture } from 'orkify/next/error-capture';
+import { getErrorToken } from 'orkify/next/error-handler';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html>
+      <body>
+        {children}
+        <OrkifyErrorCapture token={getErrorToken()} />
+      </body>
+    </html>
+  );
+}
+```
+
+```typescript
+// app/__orkify/errors/route.ts
+export { POST } from 'orkify/next/error-handler';
+```
+
+The `<OrkifyErrorCapture>` component listens for `error` and `unhandledrejection` events in the browser and posts them to the route handler. The route handler validates the request and forwards the error to the daemon over IPC.
+
+**What's captured:** error name, message, stack trace, page URL, and browser user agent.
+
+**Stack normalization.** Browser engines produce different stack trace formats. orkify normalizes Firefox and Safari stacks into V8 format (`    at functionName (file:line:col)`) before forwarding, so all errors are displayed consistently on the dashboard regardless of browser.
+
+**Security.** The route handler enforces three layers of protection:
+
+- **HMAC token** — `getErrorToken()` generates a short-lived HMAC token at render time. The route handler rejects requests with missing or expired tokens.
+- **Rate limiting** — requests are rate-limited per IP to prevent abuse.
+- **Origin validation** — the handler checks the `Origin` header against the app's hostname, rejecting cross-origin submissions.
+
+**Error Boundary integration.** For errors caught by React Error Boundaries, use `reportError()` to forward them manually:
+
+```typescript
+// app/error.tsx
+'use client';
+import { reportError } from 'orkify/next/error-capture';
+
+export default function ErrorBoundary({ error }: { error: Error }) {
+  reportError(error);
+  return <p>Something went wrong.</p>;
+}
+```
+
 See [`examples/nextjs/`](examples/nextjs/) for a working example.
 
 ## Socket.IO / WebSocket Support
@@ -1185,7 +1238,7 @@ const nextConfig: NextConfig = {
 };
 ```
 
-This applies to both webpack and turbopack modes. With this option enabled, errors from API routes and server components will resolve to the original TypeScript source.
+This applies to both webpack and turbopack modes. With this option enabled, errors from API routes and server components will resolve to the original TypeScript source. Browser errors captured via [Frontend Error Tracking](#frontend-error-tracking) go through the same source map resolution pipeline, so minified client-side stacks are mapped back to original source locations.
 
 ### Deploy Artifacts
 
