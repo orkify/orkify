@@ -31,6 +31,7 @@ Modern JS process orchestration and deployment for your own infrastructure.
 - [Boot Persistence](#boot-persistence)
 - [Container Mode](#container-mode)
 - [Deployment](#deployment)
+- [Source Map Support](#source-map-support)
 - [Cron Scheduler](#cron-scheduler)
 - [MCP Integration](#mcp-integration)
 - [Architecture](#architecture)
@@ -1163,6 +1164,59 @@ The CLI works standalone without orkify.com. Connect it by setting an API key:
 ```bash
 ORKIFY_API_KEY=orkify_xxx orkify up app.js
 ```
+
+## Source Map Support
+
+When your application uses a bundler (webpack, esbuild, turbopack, rollup, vite), errors from minified or bundled code are automatically resolved to their original source locations using source maps.
+
+The daemon reads `.map` files from disk at runtime and resolves every frame in the error's stack trace back to the original file, line, and column. The dashboard then shows the original source code instead of minified output. Resolution happens entirely on your server — source maps and original source code never leave your infrastructure. Unlike services that require uploading maps to external servers, there is no build-time upload step and no risk of source code exposure.
+
+This works automatically when `.map` files are present alongside the bundled output. All major bundlers include `sourcesContent` in their source maps by default, so resolution works even when original source files aren't on disk.
+
+### Next.js
+
+Next.js does not emit server-side source maps by default. To enable them, add the following to your `next.config.ts`:
+
+```ts
+const nextConfig: NextConfig = {
+  experimental: {
+    serverSourceMaps: true,
+  },
+};
+```
+
+This applies to both webpack and turbopack modes. With this option enabled, errors from API routes and server components will resolve to the original TypeScript source.
+
+### Deploy Artifacts
+
+Source maps are available on the deploy target as long as your bundler generates them. In most setups, the build output directory (`.next/`, `dist/`) is gitignored and excluded from the tarball — the deploy `build` step regenerates everything including `.map` files on the target.
+
+If your build output is committed and you want to exclude `.map` files from the artifact (smaller uploads), set `sourcemaps: false` in your `orkify.yml`:
+
+```yaml
+deploy:
+  install: npm ci
+  build: npm run build
+  sourcemaps: false
+```
+
+Or use the `--no-sourcemaps` flag:
+
+```bash
+orkify deploy upload --no-sourcemaps
+orkify deploy pack --no-sourcemaps
+```
+
+### Error Grouping
+
+Errors are grouped on the dashboard by a fingerprint computed from the error type, message, file, and function name:
+
+- **Function name over line number.** When a function name is available (from the stack trace or source map), the fingerprint uses `file + function name` instead of `file + line number`. This means errors stay grouped even when lines shift between deploys.
+- **Error type included.** A `TypeError` and a `ReferenceError` at the same location produce different groups.
+- **Message normalization.** Dynamic values (UUIDs, numbers, IP addresses, hex strings) are stripped from the message before hashing, so `"User 123 not found"` and `"User 456 not found"` group together.
+- **Fallback.** When no function name is available (anonymous functions, top-level code), the fingerprint falls back to `file + line number`.
+
+If you upgrade from a version without this algorithm, existing error groups will re-fingerprint once. This is expected — the new groups are more stable.
 
 ## Cron Scheduler
 

@@ -27,6 +27,8 @@ import {
   TELEMETRY_REQUEST_TIMEOUT,
 } from '../constants.js';
 import { getMachineId } from '../machine-id.js';
+import { computeFingerprint, parseFunctionName } from '../probe/compute-fingerprint.js';
+import { resolveSourceMaps } from '../probe/resolve-sourcemaps.js';
 
 export class TelemetryReporter extends EventEmitter {
   private config: TelemetryConfig;
@@ -211,13 +213,14 @@ export class TelemetryReporter extends EventEmitter {
       (data: { processName: string; workerId: number; error: Record<string, unknown> }) => {
         const err = data.error;
         const lastLogs = this.getWorkerLogs(data.processName, data.workerId);
-        this.errors.push({
+        const message = (err.message as string) || '';
+        const errorEvent: TelemetryErrorEvent = {
           processName: data.processName,
           workerId: data.workerId,
           timestamp: (err.timestamp as number) || Date.now(),
           errorType: err.errorType as 'uncaughtException' | 'unhandledRejection',
           name: (err.name as string) || 'Error',
-          message: (err.message as string) || '',
+          message,
           stack: (err.stack as string) || '',
           fingerprint: (err.fingerprint as string) || '',
           sourceContext: (err.sourceContext as TelemetryErrorEvent['sourceContext']) || null,
@@ -226,7 +229,34 @@ export class TelemetryReporter extends EventEmitter {
           nodeVersion: (err.nodeVersion as string) || '',
           pid: (err.pid as number) || 0,
           lastLogs,
+        };
+
+        // Resolve source maps for bundled/minified code
+        const originalTopFrame = errorEvent.topFrame;
+        const resolved = resolveSourceMaps(errorEvent.sourceContext, errorEvent.topFrame);
+        errorEvent.sourceContext = resolved.sourceContext;
+        errorEvent.topFrame = resolved.topFrame;
+        errorEvent.resolved = resolved.resolved;
+
+        // Compute stable fingerprint: prefer source map function name, fall back to raw stack
+        let functionName: null | string = resolved.resolvedFunctionName;
+        if (!functionName && originalTopFrame) {
+          functionName = parseFunctionName(
+            errorEvent.stack,
+            originalTopFrame.file,
+            originalTopFrame.line
+          );
+        }
+        const effectiveTop = errorEvent.topFrame;
+        errorEvent.fingerprint = computeFingerprint({
+          errorName: errorEvent.name,
+          message,
+          file: effectiveTop?.file ?? '',
+          line: effectiveTop?.line ?? 0,
+          functionName,
         });
+
+        this.errors.push(errorEvent);
 
         if (this.errors.length >= TELEMETRY_MAX_BATCH_SIZE) {
           void this.collectAndFlush();

@@ -39,6 +39,7 @@ deployCommand
     '--npm-version-patch',
     'Bump package.json patch version before upload (e.g. 1.0.0 → 1.0.1)'
   )
+  .option('--no-sourcemaps', 'Exclude .map files from the artifact')
   .action(async (dir: string | undefined, options) => {
     try {
       const projectDir = resolve(dir ?? process.cwd());
@@ -95,8 +96,9 @@ deployCommand
       }
 
       // 4. Create tarball
+      const excludeSourceMaps = options.sourcemaps === false || config.deploy?.sourcemaps === false;
       console.log('Creating artifact...');
-      const tarPath = await createTarball(projectDir);
+      const tarPath = await createTarball(projectDir, { excludeSourceMaps });
       const tarStat = statSync(tarPath);
       const sizeStr = formatSize(tarStat.size);
       console.log(chalk.dim(`  ${sizeStr}`));
@@ -186,47 +188,54 @@ deployCommand
   .description('Create a deploy tarball without uploading')
   .option('--output <path>', 'Output tarball path')
   .option('--interactive', 'Force interactive config prompts')
-  .action(async (dir: string | undefined, options: { output?: string; interactive?: boolean }) => {
-    try {
-      const projectDir = resolve(dir ?? process.cwd());
+  .option('--no-sourcemaps', 'Exclude .map files from the artifact')
+  .action(
+    async (
+      dir: string | undefined,
+      options: { output?: string; interactive?: boolean; sourcemaps?: boolean }
+    ) => {
+      try {
+        const projectDir = resolve(dir ?? process.cwd());
 
-      let config = getOrkifyConfig(projectDir);
+        let config = getOrkifyConfig(projectDir);
 
-      if (!config || !config.processes?.length || options.interactive) {
-        config = await interactiveConfig(projectDir);
-        saveOrkifyConfig(projectDir, config);
-        console.log(chalk.green(`✓ Deploy config saved to ${ORKIFY_CONFIG_FILE}`));
-      }
+        if (!config || !config.processes?.length || options.interactive) {
+          config = await interactiveConfig(projectDir);
+          saveOrkifyConfig(projectDir, config);
+          console.log(chalk.green(`✓ Deploy config saved to ${ORKIFY_CONFIG_FILE}`));
+        }
 
-      if (!existsSync(join(projectDir, ORKIFY_CONFIG_FILE))) {
-        console.error(
-          chalk.red(`✗ ${ORKIFY_CONFIG_FILE} not found. Run with --interactive to create one.`)
+        if (!existsSync(join(projectDir, ORKIFY_CONFIG_FILE))) {
+          console.error(
+            chalk.red(`✗ ${ORKIFY_CONFIG_FILE} not found. Run with --interactive to create one.`)
+          );
+          process.exit(1);
+        }
+
+        const excludeMaps = options.sourcemaps === false || config?.deploy?.sourcemaps === false;
+        console.log('Creating artifact...');
+        const tarPath = await createTarball(projectDir, { excludeSourceMaps: excludeMaps });
+
+        let finalPath = tarPath;
+        if (options.output) {
+          finalPath = resolve(options.output);
+          renameSync(tarPath, finalPath);
+        }
+
+        const tarStat = statSync(finalPath);
+        const sha256 = await computeSha256(finalPath);
+
+        console.log(
+          chalk.green(
+            `✓ Created: ${finalPath} (${formatSize(tarStat.size)}, sha256: ${sha256.slice(0, 12)}...)`
+          )
         );
+      } catch (err) {
+        console.error(chalk.red(`✗ Error: ${(err as Error).message}`));
         process.exit(1);
       }
-
-      console.log('Creating artifact...');
-      const tarPath = await createTarball(projectDir);
-
-      let finalPath = tarPath;
-      if (options.output) {
-        finalPath = resolve(options.output);
-        renameSync(tarPath, finalPath);
-      }
-
-      const tarStat = statSync(finalPath);
-      const sha256 = await computeSha256(finalPath);
-
-      console.log(
-        chalk.green(
-          `✓ Created: ${finalPath} (${formatSize(tarStat.size)}, sha256: ${sha256.slice(0, 12)}...)`
-        )
-      );
-    } catch (err) {
-      console.error(chalk.red(`✗ Error: ${(err as Error).message}`));
-      process.exit(1);
     }
-  });
+  );
 
 deployCommand
   .command('local <tarball>')

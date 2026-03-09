@@ -1,7 +1,40 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Orchestrator } from '../../src/daemon/Orchestrator.js';
-import type { ProcessInfo } from '../../src/types/index.js';
+import type { ProcessInfo, SourceContextFrame } from '../../src/types/index.js';
+
+vi.mock('../../src/probe/resolve-sourcemaps.js', () => ({
+  resolveSourceMaps: vi
+    .fn()
+    .mockImplementation(
+      (
+        sourceContext: null | SourceContextFrame[],
+        topFrame: null | { file: string; line: number; column: number }
+      ) => {
+        // If sourceContext is provided, simulate resolution
+        if (sourceContext && sourceContext.length > 0) {
+          return {
+            sourceContext: sourceContext.map((f) => ({
+              ...f,
+              file: f.file.replace('bundle.js', 'original.ts'),
+              line: 42,
+            })),
+            topFrame: topFrame
+              ? { ...topFrame, file: topFrame.file.replace('bundle.js', 'original.ts'), line: 42 }
+              : null,
+            resolvedFunctionName: 'handleRequest',
+            resolved: true,
+          };
+        }
+        return { sourceContext, topFrame, resolvedFunctionName: null, resolved: false };
+      }
+    ),
+}));
+
+vi.mock('../../src/probe/compute-fingerprint.js', () => ({
+  computeFingerprint: vi.fn().mockReturnValue('computed-fingerprint-abc'),
+  parseFunctionName: vi.fn().mockReturnValue(null),
+}));
 import {
   TELEMETRY_LOG_FLUSH_MAX_LINES,
   TELEMETRY_LOG_RING_SIZE,
@@ -820,6 +853,73 @@ describe('TelemetryReporter', () => {
       expect(body.errors[0].name).toBe('TypeError');
       expect(body.errors[0].message).toBe('Cannot read property x');
       expect(body.errors[0].lastLogs).toEqual(['before crash']);
+    });
+
+    it('applies source map resolution to error events with sourceContext', async () => {
+      reporter.start();
+
+      (orchestrator as unknown as EventEmitter).emit('worker:error:captured', {
+        processName: 'app',
+        workerId: 0,
+        error: {
+          errorType: 'uncaughtException',
+          name: 'Error',
+          message: 'minified error',
+          stack: 'at bundle.js:1:500',
+          fingerprint: 'original-fp',
+          sourceContext: [
+            {
+              file: '/project/dist/bundle.js',
+              line: 1,
+              column: 500,
+              pre: [],
+              target: 'minified code here',
+              post: [],
+            },
+          ],
+          topFrame: { file: '/project/dist/bundle.js', line: 1, column: 500 },
+          timestamp: Date.now(),
+          nodeVersion: 'v22.0.0',
+          pid: 1234,
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.errors).toHaveLength(1);
+      const err = body.errors[0];
+      expect(err.resolved).toBe(true);
+      expect(err.fingerprint).toBe('computed-fingerprint-abc');
+      expect(err.sourceContext[0].file).toContain('original.ts');
+      expect(err.sourceContext[0].line).toBe(42);
+      expect(err.topFrame.file).toContain('original.ts');
+    });
+
+    it('preserves original error when sourceContext is null (no source maps)', async () => {
+      reporter.start();
+
+      (orchestrator as unknown as EventEmitter).emit('worker:error:captured', {
+        processName: 'app',
+        workerId: 0,
+        error: {
+          errorType: 'uncaughtException',
+          name: 'Error',
+          message: 'plain error',
+          stack: 'at app.js:10:5',
+          fingerprint: 'keep-this-fp',
+          timestamp: Date.now(),
+          nodeVersion: 'v22.0.0',
+          pid: 1234,
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+      expect(body.errors).toHaveLength(1);
+      expect(body.errors[0].fingerprint).toBe('computed-fingerprint-abc');
+      expect(body.errors[0].resolved).toBe(false);
     });
 
     it('force-flushes when error buffer reaches MAX_BATCH_SIZE', async () => {

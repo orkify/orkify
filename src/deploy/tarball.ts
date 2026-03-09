@@ -189,7 +189,11 @@ export function bundleFileDeps(
  * under `.file-deps/<name>/` and the paths are rewritten so `npm ci`
  * can resolve them on the deploy target.
  */
-export async function createTarball(projectDir: string): Promise<string> {
+export interface TarballOptions {
+  excludeSourceMaps?: boolean;
+}
+
+export async function createTarball(projectDir: string, options?: TarballOptions): Promise<string> {
   const artifactsDir = join(ORKIFY_HOME, 'tmp');
   if (!existsSync(artifactsDir)) {
     mkdirSync(artifactsDir, { recursive: true });
@@ -197,7 +201,8 @@ export async function createTarball(projectDir: string): Promise<string> {
 
   const tarPath = join(artifactsDir, `deploy-${Date.now()}.tar.gz`);
   const ancestorFilters = collectAncestorFilters(projectDir);
-  const builtinIgnore = ig().add(ALWAYS_EXCLUDE);
+  const excludes = options?.excludeSourceMaps ? [...ALWAYS_EXCLUDE, '*.map'] : ALWAYS_EXCLUDE;
+  const builtinIgnore = ig().add(excludes);
   const files = walkDirectory(projectDir, projectDir, ancestorFilters, builtinIgnore);
 
   // Check for file: deps to bundle

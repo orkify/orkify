@@ -301,6 +301,7 @@ export interface TelemetryErrorEvent {
   nodeVersion: string;
   pid: number;
   lastLogs: string[];
+  resolved?: boolean;
 }
 
 export interface TelemetryLogEntry {
@@ -333,6 +334,7 @@ export interface DeploySettings {
   build?: string;
   buildEnv?: Record<string, string>;
   crashWindow?: number;
+  sourcemaps?: boolean;
 }
 
 /** @deprecated Use DeploySettings instead */
