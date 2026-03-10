@@ -43,7 +43,7 @@
     "packages/"
   ],
   "scripts": {
-    "build": "tsc -p packages/cache/tsconfig.json & tsc -p packages/next/tsconfig.json & tsc & wait",
+    "build": "tsc -p packages/cache/tsconfig.json && tsc -p packages/next/tsconfig.json && tsc",
     "dev": "tsc --watch",
     "start": "node dist/cli/index.js",
     "clean": "rm -rf dist coverage packages/cache/dist packages/next/dist",

@@ -17,6 +17,5 @@
     "socket.io",
     "react"
   ],
-  "ignoreExportsUsedInFile": true,
-  "ignoreBinaries": ["wait"]
+  "ignoreExportsUsedInFile": true
 }
