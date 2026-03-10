@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bufferToStream, streamToBuffer } from '../../src/next/stream.js';
+import { bufferToStream, streamToBuffer } from '../../packages/next/src/stream.js';
 
 describe('stream utilities', () => {
   it('round-trips a single-chunk stream', async () => {

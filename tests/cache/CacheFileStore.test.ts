@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CacheFileStore } from '../../src/cache/CacheFileStore.js';
+import { CacheFileStore } from '../../packages/cache/src/CacheFileStore.js';
 
 const TEST_PROCESS_NAME = '__test_cachefilestore__';
 const TEST_CACHE_DIR = join(process.env.HOME ?? '.', '.orkify', 'cache', TEST_PROCESS_NAME);

@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
-import { parseBrowserFrames, type StackFrame } from '../probe/parse-frames.js';
-import { extractContext } from '../probe/resolve-sourcemaps.js';
+import { extractContext, parseBrowserFrames, type StackFrame } from './utils.js';
 
 // ── Rate Limiter ────────────────────────────────────────────────────────
 
@@ -119,7 +118,7 @@ function getClientIp(request: Request): string {
  *
  * Create `app/orkify/errors/route.ts`:
  * ```ts
- * export { POST } from 'orkify/next/error-handler';
+ * export { POST } from '@orkify/next/error-handler';
  * ```
  */
 export async function POST(request: Request): Promise<Response> {

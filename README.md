@@ -324,10 +324,10 @@ Messages must have `__orkify: true` and `type: 'broadcast'`. The `channel` and `
 
 orkify ships a built-in shared cache that works across cluster workers with zero external dependencies. On a single server, reads are faster than localhost Redis — they're synchronous Map lookups with no network round trip, no serialization, and no async overhead. Writes use Node's built-in IPC (Unix domain sockets), which is also faster than a TCP hop to Redis. No extra process to run, no connection pooling to configure.
 
-Import it from `orkify/cache`:
+Import it from `@orkify/cache`:
 
 ```typescript
-import { cache } from 'orkify/cache';
+import { cache } from '@orkify/cache';
 
 cache.set('user:123', userData, { ttl: 300 }); // write + broadcast
 cache.set('key', value, { ttl: 300, tags: ['group'] }); // with tags
@@ -355,14 +355,14 @@ cache.stats(); // { size, hits, misses, hitRate, totalBytes, diskSize }
 | `orkify up -w 4` (cluster) | Broadcast cache — writes sync via IPC, reads stay local |
 | `orkify run` (foreground)  | Local cache + disk cold layer, no IPC                   |
 
-The API is identical in every mode. In standalone or fork mode, it degrades gracefully to a plain local cache — no errors, no code changes needed. You can use `orkify/cache` during local development with `node app.js` or `npm run dev` and it works as a regular Map. Deploy with `orkify up -w 4` and the same code now syncs across workers automatically.
+The API is identical in every mode. In standalone or fork mode, it degrades gracefully to a plain local cache — no errors, no code changes needed. You can use `@orkify/cache` during local development with `node app.js` or `npm run dev` and it works as a regular Map. Deploy with `orkify up -w 4` and the same code now syncs across workers automatically.
 
 ### Configuration
 
 Optional — call `cache.configure()` before the first use of `cache`, or defaults apply:
 
 ```typescript
-import { cache } from 'orkify/cache';
+import { cache } from '@orkify/cache';
 
 cache.configure({
   maxEntries: 50_000, // default: 10,000
@@ -468,7 +468,7 @@ The primary serializes writes, so concurrent sets to the same key always resolve
 In cluster mode, the cache persists across daemon restarts and stays in memory across `orkify reload`. No configuration needed.
 
 - **`orkify reload`** — the primary stays alive, new workers receive the cache via IPC snapshot. No disk I/O, no data loss.
-- **`orkify daemon-reload`** / **`orkify kill`** — the cache is written to `~/.orkify/cache/<name>.json` before the daemon exits. The new primary restores it on startup, so workers start warm.
+- **`orkify daemon-reload`** / **`orkify kill`** — the cache is written to `~/.@orkify/cache/<name>.json` before the daemon exits. The new primary restores it on startup, so workers start warm.
 - **Worker crash** — the replacement worker gets a snapshot from the primary immediately.
 - **`orkify down`** — the cache is **not** persisted. Stopping a process is an explicit action — restoring potentially stale data (old sessions, revoked tokens, expired API responses) on a later `orkify up` would cause more problems than it solves.
 - **`orkify kill --force`** — the cache is **not** persisted. Force kill sends SIGKILL with no graceful shutdown.
@@ -484,13 +484,13 @@ In cluster mode, the cache persists across daemon restarts and stays in memory a
 | `orkify down`          | Cache starts empty (clean slate)                        |
 | Daemon crash           | Cache starts empty (crash recovery doesn't persist)     |
 
-Cache files are stored per process at `~/.orkify/cache/` as JSON. Tags and V8 types (Map, Set, Date, etc.) are preserved correctly across restarts.
+Cache files are stored per process at `~/.@orkify/cache/` as JSON. Tags and V8 types (Map, Set, Date, etc.) are preserved correctly across restarts.
 
-In standalone/fork mode, the cache persists to `~/.orkify/cache/<name>/` by default and survives restarts. Use `getAsync()` to access cold entries that may be on disk. With `fileBacked: false`, the cache lives only in memory — it's gone when the process exits.
+In standalone/fork mode, the cache persists to `~/.@orkify/cache/<name>/` by default and survives restarts. Use `getAsync()` to access cold entries that may be on disk. With `fileBacked: false`, the cache lives only in memory — it's gone when the process exits.
 
 The disk layer (on by default) works as follows:
 
-- Entries evicted from memory spill to disk automatically (`~/.orkify/cache/<name>/entries/`)
+- Entries evicted from memory spill to disk automatically (`~/.@orkify/cache/<name>/entries/`)
 - On shutdown (`orkify kill`), remaining in-memory entries are flushed to disk
 - On startup, only the disk index is loaded — entries promote lazily to memory on access via `getAsync()`
 - Disk entries have their own TTL and tag expiration checks — stale entries are cleaned up on read and by periodic sweeps
@@ -542,13 +542,13 @@ const nextConfig: NextConfig = {
   // Enable 'use cache' directives (required for Next.js 16)
   cacheComponents: true,
 
-  // Next.js 16 'use cache' directives — backed by orkify/cache
+  // Next.js 16 'use cache' directives — backed by @orkify/cache
   cacheHandlers: {
-    default: require.resolve('orkify/next/use-cache'),
+    default: require.resolve('@orkify/next/use-cache'),
   },
 
-  // ISR / route cache — backed by orkify/cache
-  cacheHandler: require.resolve('orkify/next/isr-cache'),
+  // ISR / route cache — backed by @orkify/cache
+  cacheHandler: require.resolve('@orkify/next/isr-cache'),
 
   // Disable Next.js's built-in in-memory cache (orkify handles it)
   cacheMaxMemorySize: 0,
@@ -562,10 +562,10 @@ export default nextConfig;
 
 ### Cache Handlers
 
-orkify provides drop-in cache handlers for Next.js 16. Both use the same `orkify/cache` singleton, so tag invalidations propagate across all workers and affect both ISR and `'use cache'` entries.
+orkify provides drop-in cache handlers for Next.js 16. Both use the same `@orkify/cache` singleton, so tag invalidations propagate across all workers and affect both ISR and `'use cache'` entries.
 
-- **`orkify/next/use-cache`** — handles `'use cache'` directives. Converts between Next.js's stream-based interface and orkify's synchronous cache. Implements staleness checks (hard expiry, revalidation window, soft tags).
-- **`orkify/next/isr-cache`** — handles ISR / route cache. Simpler adapter: get, set, tag-based revalidation.
+- **`@orkify/next/use-cache`** — handles `'use cache'` directives. Converts between Next.js's stream-based interface and orkify's synchronous cache. Implements staleness checks (hard expiry, revalidation window, soft tags).
+- **`@orkify/next/isr-cache`** — handles ISR / route cache. Simpler adapter: get, set, tag-based revalidation.
 
 Both work standalone (`npm run dev`) and in cluster mode — the cache detects the mode automatically.
 
@@ -625,7 +625,7 @@ orkify captures unhandled browser errors (and unhandled promise rejections) and 
 
 ```typescript
 // app/layout.tsx
-import { OrkifyErrorCapture } from 'orkify/next/error-capture';
+import { OrkifyErrorCapture } from '@orkify/next/error-capture';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -641,7 +641,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
 ```typescript
 // app/orkify/errors/route.ts
-export { POST } from 'orkify/next/error-handler';
+export { POST } from '@orkify/next/error-handler';
 ```
 
 The `<OrkifyErrorCapture>` component listens for `error` and `unhandledrejection` events in the browser and posts them to the route handler. The route handler validates the request and forwards the error to the daemon over IPC.
@@ -671,7 +671,7 @@ webpack: (config, { isServer }) => {
 ```typescript
 // app/error.tsx
 'use client';
-import { reportError } from 'orkify/next/error-capture';
+import { reportError } from '@orkify/next/error-capture';
 
 export default function ErrorBoundary({ error }: { error: Error }) {
   reportError(error);

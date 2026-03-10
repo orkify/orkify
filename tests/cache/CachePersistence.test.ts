@@ -2,13 +2,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CacheSnapshot, SerializedCacheEntry } from '../../src/cache/types.js';
-import { CachePersistence } from '../../src/cache/CachePersistence.js';
+import type { CacheSnapshot, SerializedCacheEntry } from '../../packages/cache/src/types.js';
+import { CachePersistence } from '../../packages/cache/src/CachePersistence.js';
 
 // Mock CACHE_DIR to use a temp directory
 let tempDir: string;
 
-vi.mock('../../src/constants.js', () => ({
+vi.mock('../../packages/cache/src/constants.js', () => ({
   get CACHE_DIR() {
     return tempDir;
   },

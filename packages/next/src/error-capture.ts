@@ -114,7 +114,7 @@ function sendError(
  * (including Next.js `error.tsx`) where errors don't bubble to `window.onerror`.
  *
  * ```tsx
- * import { reportError } from 'orkify/next/error-capture';
+ * import { reportError } from '@orkify/next/error-capture';
  * useEffect(() => { reportError(error); }, [error]);
  * ```
  */
@@ -128,7 +128,7 @@ export function reportError(error: unknown): void {
  * Add to your root layout:
  *
  * ```tsx
- * import { OrkifyErrorCapture } from 'orkify/next/error-capture';
+ * import { OrkifyErrorCapture } from '@orkify/next/error-capture';
  *
  * <OrkifyErrorCapture />
  * ```

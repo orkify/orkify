@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { deserialize, serialize, serializedByteLength } from '../../src/cache/serialize.js';
+import {
+  deserialize,
+  serialize,
+  serializedByteLength,
+} from '../../packages/cache/src/serialize.js';
 
 describe('serialize', () => {
   describe('serialize()', () => {

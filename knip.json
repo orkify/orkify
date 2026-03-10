@@ -9,6 +9,14 @@
   ],
   "project": ["src/**/*.ts"],
   "ignore": ["src/types/**"],
-  "ignoreDependencies": ["@socket.io/sticky", "@socket.io/cluster-adapter", "socket.io", "react"],
-  "ignoreExportsUsedInFile": true
+  "ignoreDependencies": [
+    "@orkify/cache",
+    "@orkify/next",
+    "@socket.io/sticky",
+    "@socket.io/cluster-adapter",
+    "socket.io",
+    "react"
+  ],
+  "ignoreExportsUsedInFile": true,
+  "ignoreBinaries": ["wait"]
 }

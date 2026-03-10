@@ -9,7 +9,9 @@
     "start": "node server.mjs"
   },
   "dependencies": {
-    "next": "^15.3.3",
+    "@orkify/cache": "file:../../packages/cache",
+    "@orkify/next": "file:../../packages/next",
+    "next": "^16.0.0",
     "orkify": "file:../../",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
@@ -17,7 +19,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.8",
     "@types/node": "^22.15.21",
-    "@types/react": "^19.1.5",
+    "@types/react": "^19.2.14",
     "@types/react-dom": "^19.1.5",
     "tailwindcss": "^4.1.8",
     "typescript": "^5.8.3"

@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CacheWorkerMessage } from '../../src/cache/types.js';
-import { CachePrimary } from '../../src/cache/CachePrimary.js';
+import type { CacheWorkerMessage } from '../../packages/cache/src/types.js';
+import { CachePrimary } from '../../packages/cache/src/CachePrimary.js';
 
 // Mock CACHE_DIR to use a temp directory
 let tempDir: string;

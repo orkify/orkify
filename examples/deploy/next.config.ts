@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: dirname(fileURLToPath(import.meta.url)),
+  transpilePackages: ['@orkify/cache', '@orkify/next'],
   experimental: {
     serverSourceMaps: true,
   },
@@ -14,6 +15,12 @@ const nextConfig: NextConfig = {
     if (!isServer) {
       config.devtool = 'hidden-source-map';
     }
+    // @orkify packages use NodeNext .js extensions on .ts source files —
+    // tell webpack to try .ts/.tsx when it encounters a .js/.jsx import.
+    config.resolve.extensionAlias = {
+      '.js': ['.ts', '.tsx', '.js'],
+      '.jsx': ['.tsx', '.jsx'],
+    };
     return config;
   },
 };

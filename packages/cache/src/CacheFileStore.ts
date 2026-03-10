@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CacheConfig, CacheEntry, CacheSnapshot, CacheStats, ICacheStore } from './types.js';
-import { CACHE_CLEANUP_INTERVAL } from '../constants.js';
+import { CACHE_CLEANUP_INTERVAL } from './constants.js';
 import { CacheStore } from './CacheStore.js';
 import { deserialize, serialize, type Serialized, serializedByteLength } from './serialize.js';
 

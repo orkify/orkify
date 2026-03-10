@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { CacheSnapshot, SerializedCacheEntry } from './types.js';
-import { CACHE_DIR } from '../constants.js';
+import { CACHE_DIR } from './constants.js';
 import { deserialize, serialize, type Serialized } from './serialize.js';
 
 /** On-disk format — values are encoded as { data, encoding } */

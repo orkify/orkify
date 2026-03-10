@@ -10,7 +10,7 @@ import { createServer } from 'node:http';
 import { parse } from 'node:url';
 import { readFileSync, existsSync } from 'node:fs';
 import next from 'next';
-import { cache } from 'orkify/cache';
+import { cache } from '@orkify/cache';
 
 const PORT = process.env.PORT || 3050;
 const WORKER_ID = process.env.ORKIFY_WORKER_ID || '0';

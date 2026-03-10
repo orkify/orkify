@@ -7,29 +7,29 @@
   "exports": {
     ".": "./dist/cli/index.js",
     "./cache": {
-      "types": "./dist/cache/index.d.ts",
-      "import": "./dist/cache/index.js",
-      "default": "./dist/cache/index.js"
+      "types": "./packages/cache/src/index.ts",
+      "import": "./packages/cache/dist/index.js",
+      "default": "./packages/cache/dist/index.js"
     },
     "./next/use-cache": {
-      "types": "./dist/next/use-cache.d.ts",
-      "import": "./dist/next/use-cache.js",
-      "default": "./dist/next/use-cache.js"
+      "types": "./packages/next/src/use-cache.ts",
+      "import": "./packages/next/dist/use-cache.js",
+      "default": "./packages/next/dist/use-cache.js"
     },
     "./next/isr-cache": {
-      "types": "./dist/next/isr-cache.d.ts",
-      "import": "./dist/next/isr-cache.js",
-      "default": "./dist/next/isr-cache.js"
+      "types": "./packages/next/src/isr-cache.ts",
+      "import": "./packages/next/dist/isr-cache.js",
+      "default": "./packages/next/dist/isr-cache.js"
     },
     "./next/error-capture": {
-      "types": "./dist/next/error-capture.d.ts",
-      "import": "./dist/next/error-capture.js",
-      "default": "./dist/next/error-capture.js"
+      "types": "./packages/next/src/error-capture.ts",
+      "import": "./packages/next/dist/error-capture.js",
+      "default": "./packages/next/dist/error-capture.js"
     },
     "./next/error-handler": {
-      "types": "./dist/next/error-handler.d.ts",
-      "import": "./dist/next/error-handler.js",
-      "default": "./dist/next/error-handler.js"
+      "types": "./packages/next/src/error-handler.ts",
+      "import": "./packages/next/dist/error-handler.js",
+      "default": "./packages/next/dist/error-handler.js"
     }
   },
   "bin": {
@@ -39,13 +39,14 @@
     "bin/",
     "boot/",
     "dist/**/*.js",
-    "dist/**/*.d.ts"
+    "dist/**/*.d.ts",
+    "packages/"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p packages/cache/tsconfig.json & tsc -p packages/next/tsconfig.json & tsc & wait",
     "dev": "tsc --watch",
     "start": "node dist/cli/index.js",
-    "clean": "rm -rf dist coverage",
+    "clean": "rm -rf dist coverage packages/cache/dist packages/next/dist",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -95,6 +96,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.3",
+    "@orkify/cache": "file:./packages/cache",
+    "@orkify/next": "file:./packages/next",
     "@socket.io/cluster-adapter": "^0.3.0",
     "@socket.io/sticky": "^1.0.4",
     "chalk": "^5.3.0",

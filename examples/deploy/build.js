@@ -27,4 +27,6 @@ mkdirSync(typesDir, { recursive: true });
 writeFileSync(`${typesDir}routes.d.ts`, '// auto-generated stub\nexport {};\n');
 
 // Run next build
-execSync('npx next build', { stdio: 'inherit', cwd: import.meta.dirname });
+// Use webpack instead of Turbopack — @orkify packages use NodeNext .js extensions
+// on .ts files, which webpack resolves via extensionAlias in next.config.ts.
+execSync('npx next build --webpack', { stdio: 'inherit', cwd: import.meta.dirname });

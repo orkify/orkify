@@ -10,7 +10,7 @@ import type {
   CacheStats,
   ICacheStore,
 } from './types.js';
-import { CACHE_DEFAULT_MAX_VALUE_SIZE } from '../constants.js';
+import { CACHE_DEFAULT_MAX_VALUE_SIZE } from './constants.js';
 import { CacheFileStore } from './CacheFileStore.js';
 import { CacheStore } from './CacheStore.js';
 import { serialize, serializedByteLength } from './serialize.js';

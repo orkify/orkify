@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { OrkifyErrorCapture } from 'orkify/next/error-capture';
+import { OrkifyErrorCapture } from '@orkify/next/error-capture';
 import './globals.css';
 
 export const metadata: Metadata = {

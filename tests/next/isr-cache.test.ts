@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CacheClient } from '../../src/cache/CacheClient.js';
+import { CacheClient } from '../../packages/cache/src/CacheClient.js';
 
 let testClient: CacheClient;
 
-vi.mock('../../src/cache/index.js', () => {
+vi.mock('@orkify/cache', () => {
   const proxy = new Proxy(
     {},
     {
@@ -19,7 +19,7 @@ vi.mock('../../src/cache/index.js', () => {
   return { cache: proxy };
 });
 
-const { default: OrkifyCacheHandler } = await import('../../src/next/isr-cache.js');
+const { default: OrkifyCacheHandler } = await import('../../packages/next/src/isr-cache.js');
 
 describe('isr-cache handler', () => {
   let handler: InstanceType<typeof OrkifyCacheHandler>;

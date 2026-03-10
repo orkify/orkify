@@ -1,5 +1,5 @@
 import type { NextCacheEntry, NextCacheHandler, StoredCacheEntry } from './types.js';
-import { cache } from '../cache/index.js';
+import { cache } from '@orkify/cache';
 import { bufferToStream, streamToBuffer } from './stream.js';
 
 const REVALIDATING_PREFIX = '__revalidating:';

@@ -1,3 +1,4 @@
+import { extractContext } from '@orkify/next/utils';
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { type RawSourceMap, SourceMapConsumer } from 'source-map-js';
@@ -137,26 +138,6 @@ function resolveDisplayPath(cleanSource: string, mapDir: string): string {
 
   // Fallback: return the clean relative source as-is (still readable)
   return cleanSource;
-}
-
-/**
- * Extract source context (pre/target/post lines) from source content.
- */
-export function extractContext(
-  source: string,
-  line: number
-): null | { pre: string[]; target: string; post: string[] } {
-  const lines = source.split('\n');
-  if (line < 1 || line > lines.length) return null;
-
-  const start = Math.max(0, line - 6);
-  const end = Math.min(lines.length, line + 5);
-
-  return {
-    pre: lines.slice(start, line - 1),
-    target: lines[line - 1] || '',
-    post: lines.slice(line, end),
-  };
 }
 
 /**

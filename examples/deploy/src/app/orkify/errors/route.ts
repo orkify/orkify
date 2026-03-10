@@ -1,1 +1,1 @@
-export { POST } from 'orkify/next/error-handler';
+export { POST } from '@orkify/next/error-handler';

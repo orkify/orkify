@@ -11,7 +11,7 @@ import {
   CACHE_CLEANUP_INTERVAL,
   CACHE_DEFAULT_MAX_ENTRIES,
   CACHE_DEFAULT_MAX_MEMORY_SIZE,
-} from '../constants.js';
+} from './constants.js';
 import { serialize, serializedByteLength } from './serialize.js';
 
 export type OnEvictCallback = (key: string, entry: CacheEntry, reason: EvictReason) => void;

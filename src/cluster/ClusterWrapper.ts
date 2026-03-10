@@ -15,11 +15,11 @@
  * - ORKIFY_ARGS: JSON-encoded array of arguments to pass to the user script
  */
 
+import type { CacheWorkerMessage } from '@orkify/cache/types';
+import { CachePrimary } from '@orkify/cache/primary';
 import cluster, { type Worker } from 'node:cluster';
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:net';
-import type { CacheWorkerMessage } from '../cache/types.js';
-import { CachePrimary } from '../cache/CachePrimary.js';
 import { METRICS_PROBE_IMPORT } from '../constants.js';
 
 // Force round-robin scheduling on all platforms

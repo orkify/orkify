@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { normalizeStack } from '../../src/next/error-capture.js';
+import { normalizeStack } from '../../packages/next/src/error-capture.js';
 
 describe('normalizeStack', () => {
   it('passes V8 (Chrome) stacks through unchanged', () => {
@@ -85,7 +85,7 @@ describe('browser error capture', () => {
   });
 
   it('reportError sends correct payload shape', async () => {
-    const { reportError } = await import('../../src/next/error-capture.js');
+    const { reportError } = await import('../../packages/next/src/error-capture.js');
 
     const err = new Error('test error');
     err.name = 'TypeError';
@@ -112,7 +112,7 @@ describe('browser error capture', () => {
   });
 
   it('reportError ignores non-Error values', async () => {
-    const { reportError } = await import('../../src/next/error-capture.js');
+    const { reportError } = await import('../../packages/next/src/error-capture.js');
     reportError('string error');
     reportError(42);
     reportError(null);
@@ -120,7 +120,7 @@ describe('browser error capture', () => {
   });
 
   it('deduplicates errors with same stack within 5s', async () => {
-    const { reportError } = await import('../../src/next/error-capture.js');
+    const { reportError } = await import('../../packages/next/src/error-capture.js');
 
     const err = new Error('dup test');
     err.stack = '    at dup (http://localhost:3000/x.js:1:1)';
@@ -133,7 +133,7 @@ describe('browser error capture', () => {
   });
 
   it('respects maxErrors cap (default 10)', async () => {
-    const { reportError } = await import('../../src/next/error-capture.js');
+    const { reportError } = await import('../../packages/next/src/error-capture.js');
 
     for (let i = 0; i < 15; i++) {
       const err = new Error(`error-${i}`);
@@ -146,7 +146,7 @@ describe('browser error capture', () => {
   });
 
   it('exports OrkifyErrorCapture, reportError, and normalizeStack', async () => {
-    const mod = await import('../../src/next/error-capture.js');
+    const mod = await import('../../packages/next/src/error-capture.js');
     expect(typeof mod.OrkifyErrorCapture).toBe('function');
     expect(typeof mod.reportError).toBe('function');
     expect(typeof mod.normalizeStack).toBe('function');

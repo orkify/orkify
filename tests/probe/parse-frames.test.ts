@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   mapBrowserUrlToPath,
   parseBrowserFrames,
-  parseUserFrames,
   type StackFrame,
-} from '../../src/probe/parse-frames.js';
+} from '../../packages/next/src/utils.js';
+import { parseUserFrames } from '../../src/probe/parse-frames.js';
 
 const CWD = '/project';
 

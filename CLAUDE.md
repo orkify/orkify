@@ -21,15 +21,6 @@ orkify/
 ├── src/
 │   ├── alerts/
 │   │   └── AlertEvaluator.ts    # Alert rule evaluation
-│   ├── cache/
-│   │   ├── index.ts             # Lazy singleton proxy + early IPC buffer
-│   │   ├── CacheClient.ts       # Public API (get/set/delete/getAsync/tags/stats)
-│   │   ├── CacheFileStore.ts    # File-backed cold layer (disk read/write, promotion)
-│   │   ├── CachePrimary.ts      # Primary-side IPC handler + snapshots
-│   │   ├── CacheStore.ts        # In-memory store (LRU, TTL, tag index, byte tracking)
-│   │   ├── CachePersistence.ts  # Disk save/load for daemon restarts
-│   │   ├── serialize.ts         # V8/JSON value serialization
-│   │   └── types.ts             # Cache types, ICacheStore interface, IPC messages
 │   ├── cli/
 │   │   ├── index.ts             # Commander.js CLI setup
 │   │   └── commands/            # Individual command files
@@ -64,15 +55,10 @@ orkify/
 │   │   ├── server.ts            # MCP tool definitions
 │   │   ├── auth.ts              # MCP authentication
 │   │   └── http.ts              # MCP HTTP transport
-│   ├── next/
-│   │   ├── types.ts             # Next.js cache handler interfaces
-│   │   ├── stream.ts            # ReadableStream ↔ Buffer utilities
-│   │   ├── use-cache.ts         # 'use cache' handler (cacheHandlers)
-│   │   ├── isr-cache.ts         # ISR/route cache handler (cacheHandler)
-│   │   ├── error-capture.ts     # Browser error capture component ('use client')
-│   │   └── error-handler.ts     # Browser error API route handler
 │   ├── probe/
-│   │   └── parse-frames.ts      # Metrics probe frame parsing
+│   │   ├── parse-frames.ts      # Server stack frame parsing (imports StackFrame from @orkify/next/utils)
+│   │   ├── resolve-sourcemaps.ts # Source map resolution (imports extractContext from @orkify/next/utils)
+│   │   └── compute-fingerprint.ts # Error fingerprint computation
 │   ├── state/
 │   │   └── StateStore.ts        # Process persistence (snapshot.yml)
 │   ├── telemetry/
@@ -80,6 +66,11 @@ orkify/
 │   ├── types/
 │   │   └── index.ts             # TypeScript interfaces
 │   └── constants.ts             # Paths, timeouts, defaults
+├── packages/
+│   ├── cache/                     # @orkify/cache — framework-agnostic cache (publishable)
+│   │   └── src/                   # CacheClient, CacheStore, CachePrimary, CacheFileStore, etc.
+│   └── next/                      # @orkify/next — Next.js cache handlers + error tracking (publishable)
+│       └── src/                   # use-cache, isr-cache, error-capture, error-handler, utils
 ├── tests/                         # Mirrors src/ structure
 └── examples/                      # Demo applications
 ```
@@ -171,32 +162,41 @@ chore: update dependencies
 
 ### Cache Architecture
 
-- `orkify/cache` exposes a shared cache singleton via a lazy Proxy
+- `@orkify/cache` exposes a shared cache singleton via a lazy Proxy
 - In cluster mode (`ORKIFY_CLUSTER_MODE=true` + `process.send`): writes broadcast via IPC through `CachePrimary`, reads are local Map lookups
 - In standalone/fork/run mode: plain local Map, no IPC
 - Features: LRU eviction (entry-count and byte-based), TTL, tag-based invalidation, tag timestamps, V8 serialization (Map/Set/Date)
 - Two-tier architecture (`fileBacked: true`): in-memory hot layer + file-backed cold layer. Evicted entries spill to disk, promote back to memory via `getAsync()`. In cluster mode, only the primary does file I/O.
 - Config: `maxMemorySize` (bytes) enables byte-based LRU; `fileBacked` enables the cold disk layer
 - Snapshots sent to new workers on spawn; persisted to disk on `orkify kill` / `orkify daemon-reload`
-- Early IPC buffer in `cache/index.ts` captures messages before user code creates the CacheClient
+- Early IPC buffer in `packages/cache/src/index.ts` captures messages before user code creates the CacheClient
 
-### Next.js Cache Handlers
+### Next.js Integration (`packages/next/`)
 
-- `orkify/next/use-cache` — handler for Next.js 16 `'use cache'` directives (`cacheHandlers` config)
-- `orkify/next/isr-cache` — handler for ISR/route cache (`cacheHandler` config)
-- Both are thin adapters over `orkify/cache`: stream ↔ Buffer conversion, staleness checks, tag delegation
+All Next.js-specific code lives in `packages/next/` (published as `@orkify/next`). Installed as a `file:` dependency of the CLI.
+
+**Cache Handlers:**
+
+- `use-cache.ts` — handler for Next.js 16 `'use cache'` directives (`cacheHandlers` config)
+- `isr-cache.ts` — handler for ISR/route cache (`cacheHandler` config)
+- Both are thin adapters over `@orkify/cache`: stream ↔ Buffer conversion, staleness checks, tag delegation
 - Both use the same cache singleton, so tag invalidations affect both ISR and 'use cache' entries
 - Work standalone and in cluster mode — the cache handles mode detection automatically
-- Example app: `examples/nextjs/`
 
-### Browser Error Tracking
+**Browser Error Tracking:**
 
-- `orkify/next/error-capture` — `'use client'` component that captures `window.onerror` and `unhandledrejection`, normalizes Firefox/Safari stacks to V8 format, and POSTs to the app's error handler route
-- `orkify/next/error-handler` — Next.js API route handler with HMAC auth, rate limiting, origin validation; parses browser stacks, builds source context, and relays errors to the daemon via `process.send()`
+- `error-capture.ts` — `'use client'` component that captures `window.onerror` and `unhandledrejection`, normalizes Firefox/Safari stacks to V8 format, and POSTs to the app's error handler route
+- `error-handler.ts` — Next.js API route handler with origin validation, rate limiting, payload validation; parses browser stacks, builds source context, and relays errors to the daemon via `process.send()`
 - Errors flow through the same IPC path as server errors (fork mode: direct `process.send`, cluster mode: via ClusterWrapper)
 - Bundled with the regular telemetry flush — zero additional ingest calls
 - Optional: if the component and route aren't added, nothing changes
 - Example: `examples/deploy/` includes browser error trigger buttons
+
+### Publishable Packages (`packages/`)
+
+- `packages/cache/` → `@orkify/cache` — framework-agnostic cache client. Has its own `constants.ts` (no dependency on `src/constants.ts`).
+- `packages/next/` → `@orkify/next` — Next.js integration. Depends on `@orkify/cache`. Contains cache handlers (`use-cache`, `isr-cache`), error tracking (`error-capture`, `error-handler`), and shared utilities (`utils.ts`: `parseBrowserFrames`, `mapBrowserUrlToPath`, `extractContext`, `StackFrame`). The CLI's `src/probe/` imports from `@orkify/next/utils` — no code duplication.
+- Both packages are `file:` dependencies of the CLI (`package.json`). They are also copied 1:1 to the web repo's `packages/` directory (with `.js` import extensions stripped for Turbopack). A sync script in the web repo automates this: `bash scripts/sync-orkify-packages.sh`.
 
 ### IPC Protocol
 
@@ -235,22 +235,16 @@ npm run build
 
 ## Important Files
 
-| File                            | Purpose                                                     |
-| ------------------------------- | ----------------------------------------------------------- |
-| `src/daemon/Orchestrator.ts`    | Central orchestrator, handles all commands                  |
-| `src/daemon/ManagedProcess.ts`  | Manages a single process (fork or cluster)                  |
-| `src/cluster/ClusterWrapper.ts` | Cluster primary (workers, reload, sticky, cache IPC)        |
-| `src/cache/CacheClient.ts`      | Public cache API used by application code                   |
-| `src/cache/CacheFileStore.ts`   | File-backed cold layer: disk I/O, promotion, eviction spill |
-| `src/cache/CachePrimary.ts`     | Primary-side cache: IPC handling, snapshots, persist        |
-| `src/cache/CacheStore.ts`       | In-memory store with LRU, TTL, tags, byte tracking          |
-| `src/ipc/DaemonClient.ts`       | CLI-side IPC, auto-starts daemon                            |
-| `src/ipc/DaemonServer.ts`       | Daemon-side IPC server                                      |
-| `src/deploy/DeployExecutor.ts`  | Deployment orchestration (orkify.yml)                       |
-| `src/next/use-cache.ts`         | Next.js 'use cache' handler (cacheHandlers)                 |
-| `src/next/isr-cache.ts`         | Next.js ISR/route cache handler (cacheHandler)              |
-| `src/next/error-capture.ts`     | Browser error capture component ('use client')              |
-| `src/next/error-handler.ts`     | Browser error API route handler (HMAC, rate limit, IPC)     |
+| File                            | Purpose                                                          |
+| ------------------------------- | ---------------------------------------------------------------- |
+| `src/daemon/Orchestrator.ts`    | Central orchestrator, handles all commands                       |
+| `src/daemon/ManagedProcess.ts`  | Manages a single process (fork or cluster)                       |
+| `src/cluster/ClusterWrapper.ts` | Cluster primary (workers, reload, sticky, cache IPC)             |
+| `src/ipc/DaemonClient.ts`       | CLI-side IPC, auto-starts daemon                                 |
+| `src/ipc/DaemonServer.ts`       | Daemon-side IPC server                                           |
+| `src/deploy/DeployExecutor.ts`  | Deployment orchestration (orkify.yml)                            |
+| `packages/cache/`               | `@orkify/cache` — shared cache (framework-agnostic)              |
+| `packages/next/`                | `@orkify/next` — Next.js cache handlers + browser error tracking |
 
 ## Environment Variables Set for Managed Processes
 

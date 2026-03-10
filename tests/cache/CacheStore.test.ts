@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CacheStore } from '../../src/cache/CacheStore.js';
+import { CacheStore } from '../../packages/cache/src/CacheStore.js';
 
 describe('CacheStore', () => {
   let store: CacheStore;

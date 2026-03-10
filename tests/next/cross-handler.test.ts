@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { NextCacheEntry } from '../../src/next/types.js';
-import { CacheClient } from '../../src/cache/CacheClient.js';
-import { bufferToStream } from '../../src/next/stream.js';
+import type { NextCacheEntry } from '../../packages/next/src/types.js';
+import { CacheClient } from '../../packages/cache/src/CacheClient.js';
+import { bufferToStream } from '../../packages/next/src/stream.js';
 
 let testClient: CacheClient;
 
-vi.mock('../../src/cache/index.js', () => {
+vi.mock('@orkify/cache', () => {
   const proxy = new Proxy(
     {},
     {
@@ -21,8 +21,8 @@ vi.mock('../../src/cache/index.js', () => {
   return { cache: proxy };
 });
 
-const { default: IsrHandler } = await import('../../src/next/isr-cache.js');
-const { default: useCacheHandler } = await import('../../src/next/use-cache.js');
+const { default: IsrHandler } = await import('../../packages/next/src/isr-cache.js');
+const { default: useCacheHandler } = await import('../../packages/next/src/use-cache.js');
 
 function makeUseCacheEntry(overrides: Partial<NextCacheEntry> = {}): NextCacheEntry {
   return {

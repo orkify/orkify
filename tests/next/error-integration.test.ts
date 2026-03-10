@@ -16,7 +16,7 @@ const mockSend = vi.fn();
 
 beforeAll(async () => {
   vi.stubGlobal('process', { ...process, send: mockSend, cwd: process.cwd });
-  const mod = await import('../../src/next/error-handler.js');
+  const mod = await import('../../packages/next/src/error-handler.js');
   POST = mod.POST;
 });
 

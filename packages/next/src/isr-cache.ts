@@ -1,4 +1,4 @@
-import { cache } from '../cache/index.js';
+import { cache } from '@orkify/cache';
 
 /**
  * ISR / route cache handler for Next.js (`cacheHandler` config).

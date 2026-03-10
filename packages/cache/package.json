@@ -1,0 +1,27 @@
+{
+  "name": "@orkify/cache",
+  "version": "1.0.0-beta.1",
+  "private": true,
+  "description": "Framework-agnostic shared cache for orkify-managed processes",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./primary": {
+      "types": "./src/CachePrimary.ts",
+      "import": "./dist/CachePrimary.js",
+      "default": "./dist/CachePrimary.js"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "import": "./dist/types.js",
+      "default": "./dist/types.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc"
+  }
+}

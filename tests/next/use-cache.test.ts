@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { NextCacheEntry, StoredCacheEntry } from '../../src/next/types.js';
-import { CacheClient } from '../../src/cache/CacheClient.js';
-import { bufferToStream, streamToBuffer } from '../../src/next/stream.js';
+import type { NextCacheEntry, StoredCacheEntry } from '../../packages/next/src/types.js';
+import { CacheClient } from '../../packages/cache/src/CacheClient.js';
+import { bufferToStream, streamToBuffer } from '../../packages/next/src/stream.js';
 
 // We test the handler logic by importing it and using a real CacheClient
 // (standalone mode). The handler module uses the cache singleton, so we
@@ -9,7 +9,7 @@ import { bufferToStream, streamToBuffer } from '../../src/next/stream.js';
 
 let testClient: CacheClient;
 
-vi.mock('../../src/cache/index.js', () => {
+vi.mock('@orkify/cache', () => {
   const proxy = new Proxy(
     {},
     {
@@ -26,7 +26,7 @@ vi.mock('../../src/cache/index.js', () => {
 });
 
 // Import after mock setup
-const { default: handler } = await import('../../src/next/use-cache.js');
+const { default: handler } = await import('../../packages/next/src/use-cache.js');
 
 function makeEntry(overrides: Partial<NextCacheEntry> = {}): NextCacheEntry {
   return {
