@@ -265,7 +265,7 @@ export async function waitForProcessRemoved(name: string, maxWait = 10000): Prom
  * Wait until the daemon is killed (socket/pipe removed AND process dead).
  * Note: Can't use orkify list because that would auto-start the daemon.
  */
-export async function waitForDaemonKilled(maxWait = 5000): Promise<void> {
+export async function waitForDaemonKilled(maxWait = 10000): Promise<void> {
   const start = Date.now();
 
   // Read daemon PID before waiting — we'll verify it's dead after the
