@@ -57,7 +57,7 @@
     "test:e2e": "vitest run tests/integration",
     "typecheck": "tsc --noEmit",
     "knip": "knip",
-    "check": "npm run typecheck && npm run lint && npm run knip && npm run format:check && npm run test:coverage",
+    "check": "npm run build && npm run typecheck && npm run lint && npm run knip && npm run format:check && npm run test:coverage",
     "audit": "npm audit --audit-level=moderate",
     "prepack": "npm run audit && npm run check && npm run build",
     "prepare": "husky"
