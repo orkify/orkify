@@ -15,7 +15,7 @@ import {
 } from './test-utils.js';
 
 const ROOT = process.cwd();
-const CACHE_MODULE = pathToFileURL(join(ROOT, 'dist', 'cache', 'index.js')).href;
+const CACHE_MODULE = pathToFileURL(join(ROOT, 'packages', 'cache', 'dist', 'index.js')).href;
 const WORKERS = 2;
 
 function createTempDir(): string {

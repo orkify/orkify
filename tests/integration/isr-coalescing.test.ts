@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { httpGet, orkify, sleep, waitForClusterReady } from './test-utils.js';
 
 const ROOT = process.cwd();
-const USE_CACHE_MODULE = pathToFileURL(join(ROOT, 'dist', 'next', 'use-cache.js')).href;
+const USE_CACHE_MODULE = pathToFileURL(join(ROOT, 'packages', 'next', 'dist', 'use-cache.js')).href;
 const PORT = 4240;
 const APP_NAME = 'test-isr-coalesce';
 const WORKERS = 2;

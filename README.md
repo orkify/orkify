@@ -532,6 +532,15 @@ Values can be any structured-cloneable type: plain objects, arrays, strings, num
 
 orkify auto-detects Next.js apps (via `package.json` or `next.config.{ts,js,mjs}`) and provides production-grade hosting out of the box: cache handlers, security hardening, encryption key management, and deploy-time optimizations.
 
+### Packages
+
+orkify ships two companion packages for use in your application code:
+
+- **`@orkify/cache`** — framework-agnostic shared cache (documented in [Shared Cluster Cache](#shared-cluster-cache) above)
+- **`@orkify/next`** — Next.js integration: cache handlers (`use-cache`, `isr-cache`), browser error tracking (`error-capture`, `error-handler`), and shared utilities
+
+Both are bundled with orkify and available as sub-exports. Reference them in your `next.config.ts` and application code as shown below.
+
 ### Setup
 
 ```typescript
