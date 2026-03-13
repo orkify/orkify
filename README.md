@@ -719,7 +719,7 @@ orkify automatically rotates process logs to prevent unbounded disk growth. Logs
 | `--log-max-files` | `90`    | Keep up to 90 rotated archives per stream |
 | `--log-max-age`   | `90`    | Delete archives older than 90 days        |
 
-With defaults, each process uses at most ~200 MB of log storage: one 100 MB active file + up to 90 compressed archives (~1 MB each).
+With defaults, each process uses at most ~1 GB of log storage: one 100 MB active file + up to 90 compressed archives (~10 MB each at ~90% compression).
 
 ### File Layout
 
