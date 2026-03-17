@@ -383,6 +383,127 @@ describe('DeployExecutor.execute() — local deploy', () => {
   });
 });
 
+describe('DeployExecutor — progress and output callbacks', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'orkify-cb-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function createMockOrchestrator() {
+    const emitter = new EventEmitter();
+    const reconcile = vi.fn().mockResolvedValue({ started: ['app'], reloaded: [], deleted: [] });
+    return Object.assign(emitter, { reconcile });
+  }
+
+  function createStubTelemetry() {
+    return { setDeployStatus: vi.fn(), emitEvent: vi.fn() };
+  }
+
+  it('fires progress callback for each deploy phase', async () => {
+    const projectDir = join(tempDir, 'project');
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, 'package.json'), JSON.stringify({ name: 'test' }));
+    writeFileSync(join(projectDir, 'index.js'), '');
+    writeFileSync(join(projectDir, ORKIFY_CONFIG_FILE), ORKIFY_YML_MINIMAL);
+
+    const tarPath = await createTarball(projectDir);
+    const orchestrator = createMockOrchestrator();
+    const telemetry = createStubTelemetry();
+
+    const deploysDir = join(tempDir, 'deploys');
+    const executor = new DeployExecutor(
+      { apiKey: '', apiHost: '' },
+      orchestrator as never,
+      telemetry as never,
+      {
+        type: 'deploy',
+        deployId: 'test',
+        targetId: 'local',
+        artifactId: 'test',
+        version: 1,
+        sha256: '',
+        sizeBytes: 0,
+        downloadToken: '',
+        downloadUrl: '',
+        deployConfig: { install: 'echo ok' },
+      },
+      {
+        localTarball: tarPath,
+        secrets: {},
+        skipInstall: true,
+        skipTelemetry: true,
+        skipMonitor: true,
+        deploysDir,
+      }
+    );
+
+    const phases: string[] = [];
+    executor.setProgressCallback((phase) => phases.push(phase));
+
+    await executor.execute();
+
+    expect(phases).toContain('downloading');
+    expect(phases).toContain('extracting');
+    expect(phases).toContain('reloading');
+    expect(phases).toContain('success');
+
+    rmSync(tarPath);
+  });
+
+  it('fires output callback with build command output', async () => {
+    const projectDir = join(tempDir, 'project');
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, 'package.json'), JSON.stringify({ name: 'test' }));
+    writeFileSync(join(projectDir, 'index.js'), '');
+    writeFileSync(
+      join(projectDir, ORKIFY_CONFIG_FILE),
+      ORKIFY_YML_MINIMAL.replace(
+        'install: echo ok',
+        'install: echo ok\n  build: echo build-output-test'
+      )
+    );
+
+    const tarPath = await createTarball(projectDir);
+    const orchestrator = createMockOrchestrator();
+    const telemetry = createStubTelemetry();
+
+    const deploysDir = join(tempDir, 'deploys');
+    const executor = new DeployExecutor(
+      { apiKey: '', apiHost: '' },
+      orchestrator as never,
+      telemetry as never,
+      {
+        type: 'deploy',
+        deployId: 'test',
+        targetId: 'local',
+        artifactId: 'test',
+        version: 1,
+        sha256: '',
+        sizeBytes: 0,
+        downloadToken: '',
+        downloadUrl: '',
+        deployConfig: { install: 'echo installing', build: 'echo build-output-test' },
+      },
+      { localTarball: tarPath, secrets: {}, skipTelemetry: true, skipMonitor: true, deploysDir }
+    );
+
+    const output: string[] = [];
+    executor.setOutputCallback((line) => output.push(line));
+
+    await executor.execute();
+
+    expect(output.some((l) => l.includes('build-output-test'))).toBe(true);
+    expect(output.some((l) => l.includes('installing'))).toBe(true);
+
+    rmSync(tarPath);
+  });
+});
+
 describe('env file parsing', () => {
   it('parses KEY=VALUE format', () => {
     const content = `

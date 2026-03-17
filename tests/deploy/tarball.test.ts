@@ -151,6 +151,105 @@ describe('tarball', () => {
       expect(dep.files.some((f) => f.includes('node_modules'))).toBe(false);
     });
 
+    it('rewrites package-lock.json when file: deps exist', () => {
+      // Use relative paths like real npm does
+      const projectDir = join(tempDir, 'project');
+      mkdirSync(projectDir);
+      const libDir = join(projectDir, 'libs', 'my-lib');
+      mkdirSync(libDir, { recursive: true });
+      writeFileSync(join(libDir, 'index.js'), 'x');
+      writeFileSync(
+        join(libDir, 'package.json'),
+        JSON.stringify({ name: 'my-lib', version: '1.0.0' })
+      );
+
+      writeFileSync(
+        join(projectDir, 'package.json'),
+        JSON.stringify({
+          dependencies: { 'my-lib': 'file:./libs/my-lib' },
+        })
+      );
+      writeFileSync(
+        join(projectDir, 'package-lock.json'),
+        JSON.stringify({
+          lockfileVersion: 3,
+          packages: {
+            '': { dependencies: { 'my-lib': 'file:libs/my-lib' } },
+            'libs/my-lib': { name: 'my-lib', version: '1.0.0' },
+            'node_modules/my-lib': { resolved: 'libs/my-lib', link: true },
+          },
+        })
+      );
+
+      const result = bundleFileDeps(projectDir);
+      expect(result).not.toBeNull();
+      if (!result) return;
+
+      expect(result.rewrittenLock).toBeTruthy();
+      const lock = JSON.parse(result.rewrittenLock as string);
+
+      // Old package key should be replaced
+      expect(lock.packages['libs/my-lib']).toBeUndefined();
+      expect(lock.packages['.file-deps/my-lib']).toBeDefined();
+
+      // node_modules link should point to new path
+      expect(lock.packages['node_modules/my-lib'].resolved).toBe('.file-deps/my-lib');
+    });
+
+    it('rewrites nested file: specifiers in lock file dependencies', () => {
+      const projectDir = join(tempDir, 'project');
+      mkdirSync(projectDir);
+      const libDir = join(projectDir, 'libs', 'my-lib');
+      mkdirSync(libDir, { recursive: true });
+      writeFileSync(join(libDir, 'index.js'), 'x');
+
+      writeFileSync(
+        join(projectDir, 'package.json'),
+        JSON.stringify({ dependencies: { 'my-lib': 'file:./libs/my-lib' } })
+      );
+      writeFileSync(
+        join(projectDir, 'package-lock.json'),
+        JSON.stringify({
+          lockfileVersion: 3,
+          packages: {
+            '': { dependencies: { 'my-lib': 'file:libs/my-lib' } },
+            'libs/my-lib': { name: 'my-lib', version: '1.0.0' },
+            'node_modules/other': {
+              dependencies: { 'my-lib': 'file:libs/my-lib' },
+            },
+          },
+        })
+      );
+
+      const result = bundleFileDeps(projectDir);
+      expect(result).not.toBeNull();
+      if (!result) return;
+
+      expect(result.rewrittenLock).toBeTruthy();
+      const lock = JSON.parse(result.rewrittenLock as string);
+      expect(lock.packages['node_modules/other'].dependencies['my-lib']).toBe(
+        'file:.file-deps/my-lib'
+      );
+    });
+
+    it('returns null rewrittenLock when no package-lock.json exists', () => {
+      const projectDir = join(tempDir, 'project');
+      mkdirSync(projectDir);
+      const libDir = join(projectDir, 'libs', 'my-lib');
+      mkdirSync(libDir, { recursive: true });
+      writeFileSync(join(libDir, 'index.js'), 'x');
+
+      writeFileSync(
+        join(projectDir, 'package.json'),
+        JSON.stringify({ dependencies: { 'my-lib': 'file:./libs/my-lib' } })
+      );
+
+      const result = bundleFileDeps(projectDir);
+      expect(result).not.toBeNull();
+      if (!result) return;
+      expect(result.rewrittenLock).toBeNull();
+    });
+
     it('throws when file: dep path does not exist', () => {
       const projectDir = join(tempDir, 'project');
       mkdirSync(projectDir);

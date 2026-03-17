@@ -1,6 +1,6 @@
 {
   "name": "orkify",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.5",
   "description": "Modern JS process orchestration and deployment for your own infrastructure",
   "type": "module",
   "main": "dist/cli/index.js",

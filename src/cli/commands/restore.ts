@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { DeployRestorePayload, ProcessInfo, RestorePayload } from '../../types/index.js';
 import {
   DEPLOY_META_FILE,
+  IPC_DEPLOY_TIMEOUT,
   IPCMessageType,
   ORKIFY_DEPLOYS_DIR,
   TELEMETRY_DEFAULT_API_HOST,
@@ -41,7 +42,11 @@ export const restoreCommand = new Command('restore')
               );
             } else {
               const payload = (await res.json()) as DeployRestorePayload;
-              const response = await daemonClient.request(IPCMessageType.DEPLOY_RESTORE, payload);
+              const response = await daemonClient.request(
+                IPCMessageType.DEPLOY_RESTORE,
+                payload,
+                IPC_DEPLOY_TIMEOUT
+              );
 
               if (response.success) {
                 const data = response.data as

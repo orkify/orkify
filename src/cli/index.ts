@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { autostartCommand } from './commands/autostart.js';
 import { crashTestCommand } from './commands/crash-test.js';
 import { daemonReloadCommand } from './commands/daemon-reload.js';
@@ -24,7 +27,11 @@ const program = new Command();
 program
   .name('orkify')
   .description('Modern JS process orchestration and deployment for your own infrastructure')
-  .version('1.0.0');
+  .version(
+    JSON.parse(
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../package.json'), 'utf-8')
+    ).version
+  );
 
 program.addCommand(upCommand);
 program.addCommand(downCommand);

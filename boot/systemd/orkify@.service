@@ -21,7 +21,9 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 User=%i
+EnvironmentFile=-/etc/orkify/env
 ExecStart=/usr/local/bin/orkify restore
+ExecReload=/usr/local/bin/orkify daemon-reload
 ExecStop=/usr/local/bin/orkify kill
 
 [Install]

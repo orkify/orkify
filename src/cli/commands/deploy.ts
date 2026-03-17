@@ -15,7 +15,12 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { DeployLocalPayload } from '../../types/index.js';
-import { IPCMessageType, ORKIFY_CONFIG_FILE, TELEMETRY_DEFAULT_API_HOST } from '../../constants.js';
+import {
+  IPC_DEPLOY_TIMEOUT,
+  IPCMessageType,
+  ORKIFY_CONFIG_FILE,
+  TELEMETRY_DEFAULT_API_HOST,
+} from '../../constants.js';
 import {
   collectGitMetadata,
   getOrkifyConfig,
@@ -291,7 +296,16 @@ deployCommand
         env,
       };
 
-      const response = await daemonClient.request(IPCMessageType.DEPLOY_LOCAL, payload as never);
+      const response = await daemonClient.requestWithProgress(
+        IPCMessageType.DEPLOY_LOCAL,
+        payload as never,
+        (data) => {
+          const { phase, output } = data as { output?: string; phase?: string };
+          if (phase) console.log(chalk.dim(`  → ${phase}`));
+          else if (output) console.log(chalk.dim(`    ${output}`));
+        },
+        IPC_DEPLOY_TIMEOUT
+      );
 
       if (response.success) {
         console.log(chalk.green('✓ Deploy complete'));

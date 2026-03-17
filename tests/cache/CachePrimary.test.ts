@@ -18,9 +18,10 @@ vi.mock('../../src/constants.js', () => ({
   },
 }));
 
+let nextWorkerId = 1;
 function createMockWorker(connected = true) {
   return {
-    id: Math.floor(Math.random() * 1000),
+    id: nextWorkerId++,
     isConnected: vi.fn(() => connected),
     send: vi.fn(),
   };

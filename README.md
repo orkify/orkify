@@ -983,6 +983,20 @@ Make sure to snapshot your processes so there is something to restore:
 orkify snap
 ```
 
+### Environment Variables (optional)
+
+To inject environment variables (API keys, database credentials, etc.) into your managed processes, create an env file:
+
+```bash
+sudo mkdir -p /etc/orkify
+sudo touch /etc/orkify/env
+sudo chmod 600 /etc/orkify/env
+```
+
+The service template looks for `/etc/orkify/env` and loads it if present. Variables defined there are available to all orkify-managed processes. The file is read by systemd as root before dropping privileges, so `chmod 600` keeps your secrets safe while still injecting them into the process environment.
+
+### Starting
+
 To start immediately without rebooting:
 
 ```bash

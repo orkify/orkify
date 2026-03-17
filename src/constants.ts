@@ -30,6 +30,7 @@ export const KILL_TIMEOUT = 5000;
 export const LAUNCH_TIMEOUT = 30_000;
 export const IPC_CONNECT_TIMEOUT = 3000;
 export const IPC_RESPONSE_TIMEOUT = 120000; // 2 minutes for long operations like reload
+export const IPC_DEPLOY_TIMEOUT = 600000; // 10 minutes for deploy (install + build)
 
 // Defaults
 export const DEFAULT_WORKERS = 1;
@@ -91,6 +92,7 @@ export const IPCMessageType = {
   ERROR: 'error',
   PROCESS_LIST: 'process_list',
   LOG_DATA: 'log_data',
+  DEPLOY_PROGRESS: 'deploy_progress',
   PONG: 'pong',
 } as const;
 

@@ -394,7 +394,7 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
     return createResponse(request.id, true, results);
   });
 
-  server.registerHandler(IPCMessageType.DEPLOY_LOCAL, async (request) => {
+  server.registerHandler(IPCMessageType.DEPLOY_LOCAL, async (request, client) => {
     const p = request.payload as DeployLocalPayload;
     const version = Math.floor(Date.now() / 1000);
     const cmd: DeployCommand = {
@@ -425,11 +425,30 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
       cmd,
       deployOptions
     );
-    await executor.execute();
+    executor.setProgressCallback((phase) => {
+      client.send({
+        id: request.id,
+        type: IPCMessageType.DEPLOY_PROGRESS,
+        success: true,
+        data: { phase },
+      });
+    });
+    executor.setOutputCallback((line) => {
+      client.send({
+        id: request.id,
+        type: IPCMessageType.DEPLOY_PROGRESS,
+        success: true,
+        data: { output: line },
+      });
+    });
+    const result = await executor.execute();
+    if (!result.success) {
+      return createResponse(request.id, false, undefined, result.error);
+    }
     return createResponse(request.id, true, { deployed: true });
   });
 
-  server.registerHandler(IPCMessageType.DEPLOY_RESTORE, async (request) => {
+  server.registerHandler(IPCMessageType.DEPLOY_RESTORE, async (request, client) => {
     const p = request.payload as DeployRestorePayload;
 
     if (p.downloadUrl) {
@@ -461,7 +480,26 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
         cmd,
         deployOptions
       );
-      await executor.execute();
+      executor.setProgressCallback((phase) => {
+        client.send({
+          id: request.id,
+          type: IPCMessageType.DEPLOY_PROGRESS,
+          success: true,
+          data: { phase },
+        });
+      });
+      executor.setOutputCallback((line) => {
+        client.send({
+          id: request.id,
+          type: IPCMessageType.DEPLOY_PROGRESS,
+          success: true,
+          data: { output: line },
+        });
+      });
+      const result = await executor.execute();
+      if (!result.success) {
+        return createResponse(request.id, false, undefined, result.error);
+      }
       return createResponse(request.id, true, { deployed: true, version: p.version });
     } else {
       // Current is latest — reconcile from local with secrets

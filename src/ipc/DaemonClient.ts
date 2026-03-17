@@ -41,6 +41,7 @@ export class DaemonClient {
     }
   >();
   private streamHandlers = new Map<string, (data: unknown) => void>();
+  private progressHandlers = new Map<string, (data: unknown) => void>();
   private spawnEnv: Record<string, string> = {};
 
   async connect(): Promise<void> {
@@ -211,11 +212,20 @@ export class DaemonClient {
 
   private handleMessage(message: IPCMessage): void {
     const response = message as IPCResponse;
+
+    // Deploy progress — emit to handler without resolving the pending request
+    if (message.type === IPCMessageType.DEPLOY_PROGRESS) {
+      const handler = this.progressHandlers.get(response.id);
+      handler?.(response.data);
+      return;
+    }
+
     const pending = this.pendingRequests.get(response.id);
 
     if (pending) {
       clearTimeout(pending.timeout);
       this.pendingRequests.delete(response.id);
+      this.progressHandlers.delete(response.id);
       pending.resolve(response);
       return;
     }
@@ -227,7 +237,7 @@ export class DaemonClient {
     }
   }
 
-  async send(request: IPCRequest): Promise<IPCResponse> {
+  async send(request: IPCRequest, timeoutMs?: number): Promise<IPCResponse> {
     const socket = this.socket;
     if (!socket) {
       throw new Error('Not connected to daemon');
@@ -237,7 +247,7 @@ export class DaemonClient {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(request.id);
         reject(new Error('Request timeout'));
-      }, IPC_RESPONSE_TIMEOUT);
+      }, timeoutMs ?? IPC_RESPONSE_TIMEOUT);
 
       this.pendingRequests.set(request.id, { resolve, reject, timeout });
       socket.write(serialize(request));
@@ -246,11 +256,24 @@ export class DaemonClient {
 
   async request(
     type: (typeof IPCMessageType)[keyof typeof IPCMessageType],
-    payload?: IPCRequest['payload']
+    payload?: IPCRequest['payload'],
+    timeoutMs?: number
   ): Promise<IPCResponse> {
     await this.connect();
     const request = createRequest(type, payload);
-    return this.send(request);
+    return this.send(request, timeoutMs);
+  }
+
+  async requestWithProgress(
+    type: (typeof IPCMessageType)[keyof typeof IPCMessageType],
+    payload: IPCRequest['payload'],
+    onProgress: (data: unknown) => void,
+    timeoutMs?: number
+  ): Promise<IPCResponse> {
+    await this.connect();
+    const request = createRequest(type, payload);
+    this.progressHandlers.set(request.id, onProgress);
+    return this.send(request, timeoutMs);
   }
 
   async streamLogs(

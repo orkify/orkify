@@ -146,12 +146,14 @@ interface FileDep {
  */
 export function bundleFileDeps(
   projectDir: string
-): null | { rewrittenPkg: string; fileDeps: Map<string, FileDep> } {
+): null | { rewrittenPkg: string; rewrittenLock: null | string; fileDeps: Map<string, FileDep> } {
   const pkgPath = join(projectDir, 'package.json');
   if (!existsSync(pkgPath)) return null;
 
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
   const fileDeps = new Map<string, FileDep>();
+  // Track original relative path → new .file-deps path for lock file rewriting
+  const pathRewrites = new Map<string, string>();
 
   for (const section of ['dependencies', 'devDependencies'] as const) {
     const deps = pkg[section] as Record<string, string> | undefined;
@@ -160,7 +162,8 @@ export function bundleFileDeps(
     for (const [name, spec] of Object.entries(deps)) {
       if (!spec.startsWith('file:')) continue;
 
-      const depDir = resolve(projectDir, spec.slice(5));
+      const rawRelPath = spec.slice(5);
+      const depDir = resolve(projectDir, rawRelPath);
       if (!existsSync(depDir)) {
         throw new Error(`file: dependency "${name}" points to "${depDir}" which does not exist`);
       }
@@ -169,13 +172,59 @@ export function bundleFileDeps(
       const builtinIgnore = ig().add(ALWAYS_EXCLUDE);
       const files = walkDirectory(depDir, depDir, ancestorFilters, builtinIgnore);
 
-      deps[name] = `file:.file-deps/${name}`;
+      // Normalize the relative path (strip leading ./) to match lock file keys
+      const normalizedRel = relative(projectDir, depDir).split(sep).join('/');
+      const newPath = `.file-deps/${name}`;
+      deps[name] = `file:${newPath}`;
+      pathRewrites.set(normalizedRel, newPath);
       fileDeps.set(name, { dir: depDir, files });
     }
   }
 
   if (fileDeps.size === 0) return null;
-  return { rewrittenPkg: JSON.stringify(pkg, null, 2) + '\n', fileDeps };
+
+  // Rewrite package-lock.json to match the new file: paths
+  let rewrittenLock: null | string = null;
+  const lockPath = join(projectDir, 'package-lock.json');
+  if (existsSync(lockPath)) {
+    const lock = JSON.parse(readFileSync(lockPath, 'utf-8'));
+    const packages = lock.packages as Record<string, Record<string, unknown>> | undefined;
+    if (packages) {
+      const renames: [string, string][] = [];
+      for (const [oldRel, newRel] of pathRewrites) {
+        // Rewrite the package entry key (e.g. "packages/cache" → ".file-deps/@orkify/cache")
+        if (packages[oldRel]) {
+          renames.push([oldRel, newRel]);
+        }
+        // Rewrite node_modules link entries that resolve to the old path
+        for (const [key, val] of Object.entries(packages)) {
+          if (key.startsWith('node_modules/') && val.resolved === oldRel) {
+            val.resolved = newRel;
+          }
+        }
+      }
+      for (const [oldKey, newKey] of renames) {
+        packages[newKey] = packages[oldKey];
+        delete packages[oldKey];
+      }
+      // Also rewrite any file: specifiers in nested dependencies
+      for (const val of Object.values(packages)) {
+        const deps = val.dependencies as Record<string, string> | undefined;
+        if (!deps) continue;
+        for (const [depName, depSpec] of Object.entries(deps)) {
+          if (typeof depSpec === 'string' && depSpec.startsWith('file:')) {
+            const rel = depSpec.slice(5);
+            if (pathRewrites.has(rel)) {
+              deps[depName] = `file:${pathRewrites.get(rel)}`;
+            }
+          }
+        }
+      }
+    }
+    rewrittenLock = JSON.stringify(lock, null, 2) + '\n';
+  }
+
+  return { rewrittenPkg: JSON.stringify(pkg, null, 2) + '\n', rewrittenLock, fileDeps };
 }
 
 /**
@@ -217,8 +266,9 @@ export async function createTarball(projectDir: string, options?: TarballOptions
   for (const file of files) {
     const rel = relative(projectDir, file).split(sep).join('/');
 
-    // Skip package.json if we need to rewrite it
-    if (bundle && rel === 'package.json') continue;
+    // Skip package.json and package-lock.json if we need to rewrite them
+    if (bundle && (rel === 'package.json' || (rel === 'package-lock.json' && bundle.rewrittenLock)))
+      continue;
 
     const stat = statSync(file);
     p.entry({ name: rel, size: stat.size, mode: stat.mode, mtime: stat.mtime }, readFileSync(file));
@@ -228,6 +278,12 @@ export async function createTarball(projectDir: string, options?: TarballOptions
     // Add rewritten package.json
     const content = Buffer.from(bundle.rewrittenPkg);
     p.entry({ name: 'package.json', size: content.length }, content);
+
+    // Add rewritten package-lock.json
+    if (bundle.rewrittenLock) {
+      const lockContent = Buffer.from(bundle.rewrittenLock);
+      p.entry({ name: 'package-lock.json', size: lockContent.length }, lockContent);
+    }
 
     // Add bundled file: dep contents
     for (const [name, dep] of bundle.fileDeps) {

@@ -39,6 +39,8 @@ export class DeployExecutor {
   private buildLog = '';
   private buildLogLines: string[] = [];
   private nextDeploymentId: string | undefined;
+  private onProgress?: (phase: string, error?: string) => void;
+  private onOutput?: (line: string) => void;
 
   constructor(
     config: TelemetryConfig,
@@ -54,7 +56,15 @@ export class DeployExecutor {
     this.options = options ?? {};
   }
 
-  async execute(): Promise<void> {
+  setProgressCallback(cb: (phase: string, error?: string) => void): void {
+    this.onProgress = cb;
+  }
+
+  setOutputCallback(cb: (line: string) => void): void {
+    this.onOutput = cb;
+  }
+
+  async execute(): Promise<{ success: boolean; error?: string }> {
     const deployConfig = this.cmd.deployConfig;
     const deploysDir = this.options.deploysDir ?? ORKIFY_DEPLOYS_DIR;
     const releaseName = this.options.localTarball
@@ -149,10 +159,15 @@ export class DeployExecutor {
             this.swapSymlink(currentLink, previousDir);
             await this.reconcileProcesses(currentLink, secrets);
             this.reportPhase('rolled_back', 'Workers crashed within monitoring window');
+            return {
+              success: false,
+              error: 'Workers crashed within monitoring window, rolled back',
+            };
           } else {
-            this.reportPhase('failed', 'Workers crashed and no previous version to rollback to');
+            const msg = 'Workers crashed and no previous version to rollback to';
+            this.reportPhase('failed', msg);
+            return { success: false, error: msg };
           }
-          return;
         }
       }
 
@@ -161,13 +176,17 @@ export class DeployExecutor {
 
       // 10. Cleanup old releases (preserve the previous version for rollback)
       this.cleanupOldReleases(releasesDir, 3, previousDir);
+      return { success: true };
     } catch (err) {
-      this.reportPhase('failed', (err as Error).message);
+      const message = (err as Error).message;
+      this.reportPhase('failed', message);
+      return { success: false, error: message };
     }
   }
 
   private reportPhase(phase: DeployStatus['phase'], error?: string): void {
     console.log(`[deploy] v${this.cmd.version}: ${phase}${error ? ` — ${error}` : ''}`);
+    this.onProgress?.(phase, error);
 
     if (this.options.skipTelemetry) return;
 
@@ -270,10 +289,15 @@ export class DeployExecutor {
       const capture = (data: Buffer) => {
         const text = data.toString();
         this.buildLogLines.push(...text.split('\n'));
-        if (this.buildLogLines.length > 200) {
-          this.buildLogLines.splice(0, this.buildLogLines.length - 200);
+        if (this.buildLogLines.length > 1000) {
+          this.buildLogLines.splice(0, this.buildLogLines.length - 1000);
         }
         this.buildLog = this.buildLogLines.join('\n');
+        if (this.onOutput) {
+          for (const line of text.split('\n')) {
+            if (line.trim()) this.onOutput(line);
+          }
+        }
       };
 
       child.stdout?.on('data', capture);
@@ -281,12 +305,7 @@ export class DeployExecutor {
 
       child.on('exit', (code) => {
         if (code === 0) resolve();
-        else
-          reject(
-            new Error(
-              `Command "${cmd}" exited with code ${code}\n${this.buildLogLines.slice(-20).join('\n')}`
-            )
-          );
+        else reject(new Error(`Command "${cmd}" exited with code ${code}\n${this.buildLog}`));
       });
 
       child.on('error', reject);
