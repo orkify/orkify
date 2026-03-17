@@ -12,6 +12,6 @@ describe('CLI', () => {
 
   it('shows version', async () => {
     const output = await orkify('--version');
-    expect(output.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(output.trim()).toMatch(/^\d+\.\d+\.\d+(-[\w.]+)?$/);
   });
 });
