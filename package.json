@@ -1,36 +1,14 @@
 {
-  "name": "orkify",
-  "version": "1.0.0-beta.5",
+  "name": "@orkify/cli",
+  "version": "1.0.0-beta.6",
   "description": "Modern JS process orchestration and deployment for your own infrastructure",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "main": "dist/cli/index.js",
   "exports": {
-    ".": "./dist/cli/index.js",
-    "./cache": {
-      "types": "./packages/cache/src/index.ts",
-      "import": "./packages/cache/dist/index.js",
-      "default": "./packages/cache/dist/index.js"
-    },
-    "./next/use-cache": {
-      "types": "./packages/next/src/use-cache.ts",
-      "import": "./packages/next/dist/use-cache.js",
-      "default": "./packages/next/dist/use-cache.js"
-    },
-    "./next/isr-cache": {
-      "types": "./packages/next/src/isr-cache.ts",
-      "import": "./packages/next/dist/isr-cache.js",
-      "default": "./packages/next/dist/isr-cache.js"
-    },
-    "./next/error-capture": {
-      "types": "./packages/next/src/error-capture.ts",
-      "import": "./packages/next/dist/error-capture.js",
-      "default": "./packages/next/dist/error-capture.js"
-    },
-    "./next/error-handler": {
-      "types": "./packages/next/src/error-handler.ts",
-      "import": "./packages/next/dist/error-handler.js",
-      "default": "./packages/next/dist/error-handler.js"
-    }
+    ".": "./dist/cli/index.js"
   },
   "bin": {
     "orkify": "./bin/orkify"
@@ -39,8 +17,7 @@
     "bin/",
     "boot/",
     "dist/**/*.js",
-    "dist/**/*.d.ts",
-    "packages/"
+    "dist/**/*.d.ts"
   ],
   "scripts": {
     "build": "tsc -p packages/cache/tsconfig.json && tsc -p packages/next/tsconfig.json && tsc",
@@ -96,8 +73,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.3",
-    "@orkify/cache": "file:./packages/cache",
-    "@orkify/next": "file:./packages/next",
+    "@orkify/cache": "^1.0.0-beta.6",
+    "@orkify/next": "^1.0.0-beta.6",
     "@socket.io/cluster-adapter": "^0.3.0",
     "@socket.io/sticky": "^1.0.4",
     "chalk": "^5.3.0",

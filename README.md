@@ -2,9 +2,9 @@
 
 [![Beta](https://img.shields.io/badge/status-beta-yellow)](https://github.com/orkify/orkify)
 [![CI](https://github.com/orkify/orkify/actions/workflows/ci.yml/badge.svg)](https://github.com/orkify/orkify/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/orkify)](https://www.npmjs.com/package/orkify)
-[![Node](https://img.shields.io/node/v/orkify)](https://nodejs.org/)
-[![License](https://img.shields.io/npm/l/orkify)](https://github.com/orkify/orkify/blob/main/LICENSE)
+[![npm](https://img.shields.io/npm/v/@orkify/cli)](https://www.npmjs.com/package/@orkify/cli)
+[![Node](https://img.shields.io/node/v/@orkify/cli)](https://nodejs.org/)
+[![License](https://img.shields.io/npm/l/@orkify/cli)](https://github.com/orkify/orkify/blob/main/LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-%E2%89%A55.9-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
 Modern JS process orchestration and deployment for your own infrastructure.
@@ -59,8 +59,13 @@ Modern JS process orchestration and deployment for your own infrastructure.
 ## Installation
 
 ```bash
-npm install
-npm run build
+npm install -g @orkify/cli
+```
+
+Or run directly with npx:
+
+```bash
+npx @orkify/cli up app.js
 ```
 
 ## Quick Start

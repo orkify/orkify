@@ -1,41 +1,52 @@
 {
   "name": "@orkify/next",
-  "version": "1.0.0-beta.1",
-  "private": true,
+  "version": "1.0.0-beta.6",
   "description": "Next.js integration for orkify — cache handlers and browser error tracking",
   "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orkify/orkify.git",
+    "directory": "packages/next"
+  },
+  "homepage": "https://orkify.com",
   "exports": {
     "./use-cache": {
-      "types": "./src/use-cache.ts",
+      "types": "./dist/use-cache.d.ts",
       "import": "./dist/use-cache.js",
       "default": "./dist/use-cache.js"
     },
     "./isr-cache": {
-      "types": "./src/isr-cache.ts",
+      "types": "./dist/isr-cache.d.ts",
       "import": "./dist/isr-cache.js",
       "default": "./dist/isr-cache.js"
     },
     "./error-capture": {
-      "types": "./src/error-capture.ts",
+      "types": "./dist/error-capture.d.ts",
       "import": "./dist/error-capture.js",
       "default": "./dist/error-capture.js"
     },
     "./error-handler": {
-      "types": "./src/error-handler.ts",
+      "types": "./dist/error-handler.d.ts",
       "import": "./dist/error-handler.js",
       "default": "./dist/error-handler.js"
     },
     "./utils": {
-      "types": "./src/utils.ts",
+      "types": "./dist/utils.d.ts",
       "import": "./dist/utils.js",
       "default": "./dist/utils.js"
     }
   },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc"
   },
   "dependencies": {
-    "@orkify/cache": "file:../cache"
+    "@orkify/cache": "^1.0.0-beta.6"
   },
   "peerDependencies": {
     "react": ">=18",

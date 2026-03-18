@@ -1,6 +1,6 @@
 # @orkify/cache
 
-[![npm](https://img.shields.io/npm/v/@orkify/cache)](https://www.npmjs.com/package/@orkify/cache)
+[![npm](https://img.shields.io/npm/v/@orkify/cli)](https://www.npmjs.com/package/@orkify/cli)
 [![Node](https://img.shields.io/node/v/orkify)](https://nodejs.org/)
 [![License](https://img.shields.io/npm/l/orkify)](https://github.com/orkify/orkify/blob/main/LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-%E2%89%A55.9-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -9,8 +9,10 @@ Framework-agnostic shared cache for [orkify](https://orkify.com)-managed Node.js
 
 ## Installation
 
+The cache is bundled with the CLI. Install `@orkify/cli` and import from `@orkify/cli/cache`:
+
 ```bash
-npm install @orkify/cache
+npm install @orkify/cli
 ```
 
 ## Usage
