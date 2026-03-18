@@ -6,11 +6,11 @@ const nextConfig: NextConfig = {
 
   // Next.js 16 'use cache' directives — backed by orkify/cache
   cacheHandlers: {
-    default: require.resolve('orkify/next/use-cache'),
+    default: require.resolve('@orkify/next/use-cache'),
   },
 
   // ISR / route cache — backed by orkify/cache
-  cacheHandler: require.resolve('orkify/next/isr-cache'),
+  cacheHandler: require.resolve('@orkify/next/isr-cache'),
 
   // Disable Next.js's built-in in-memory cache (orkify handles it)
   cacheMaxMemorySize: 0,

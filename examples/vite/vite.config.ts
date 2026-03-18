@@ -10,7 +10,7 @@ export default defineConfig({
       output: {
         entryFileNames: 'server.js',
       },
-      external: ['orkify', 'orkify/cache'],
+      external: ['@orkify/cli', '@orkify/cache'],
     },
     outDir: 'dist',
   },

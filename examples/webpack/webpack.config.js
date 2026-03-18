@@ -30,6 +30,6 @@ export default {
     outputModule: true,
   },
   externals: {
-    orkify: 'orkify',
+    '@orkify/cli': '@orkify/cli',
   },
 };

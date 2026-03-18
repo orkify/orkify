@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "next": "^16.0.0",
-    "orkify": "file:../../",
+    "@orkify/cache": "file:../../packages/cache",
+    "@orkify/next": "file:../../packages/next",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
