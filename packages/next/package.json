@@ -42,6 +42,9 @@
     "dist/**/*.d.ts",
     "README.md"
   ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsc"
   },

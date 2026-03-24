@@ -47,11 +47,10 @@ jobs:
       - name: Run E2E tests
         run: npm run test:e2e
 
-  # Step 2: E2E on Windows and macOS (run in parallel after Linux passes)
+  # E2E on Windows and macOS (run in parallel with Linux — free for public repos)
   e2e-windows:
     name: E2E (Windows)
     runs-on: windows-latest
-    needs: linux
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +78,6 @@ jobs:
   e2e-macos:
     name: E2E (macOS)
     runs-on: macos-latest
-    needs: e2e-windows
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

@@ -327,9 +327,7 @@ Messages must have `__orkify: true` and `type: 'broadcast'`. The `channel` and `
 
 ## Shared Cluster Cache
 
-orkify ships a built-in shared cache that works across cluster workers with zero external dependencies. On a single server, reads are faster than localhost Redis — they're synchronous Map lookups with no network round trip, no serialization, and no async overhead. Writes use Node's built-in IPC (Unix domain sockets), which is also faster than a TCP hop to Redis. No extra process to run, no connection pooling to configure.
-
-Import it from `@orkify/cache`:
+orkify ships a built-in shared cache that works across cluster workers with zero external dependencies. Reads are synchronous Map lookups — faster than localhost Redis with no network round trip, no serialization, and no async overhead.
 
 ```typescript
 import { cache } from '@orkify/cache';
@@ -338,362 +336,38 @@ cache.set('user:123', userData, { ttl: 300 }); // write + broadcast
 cache.set('key', value, { ttl: 300, tags: ['group'] }); // with tags
 cache.get<User>('user:123'); // sync — in-memory only
 await cache.getAsync<User>('user:123'); // async — memory first, then disk
-cache.has('key'); // sync local check
-cache.delete('key'); // delete + broadcast
-cache.clear(); // clear + broadcast
-cache.invalidateTag('group'); // delete all tagged entries + record timestamp
-cache.getTagExpiration(['group']); // when was this tag last invalidated?
-cache.updateTagTimestamp('group'); // record timestamp without deleting entries
+cache.invalidateTag('group'); // bulk invalidation across workers
 cache.stats(); // { size, hits, misses, hitRate, totalBytes, diskSize }
 ```
 
-`get()` reads from memory only — always sync, zero overhead. `getAsync()` checks memory first, then falls back to disk if file-backed mode is enabled. Without file-backed mode, `getAsync()` is identical to `get()` (just wrapped in a resolved promise, no disk I/O).
+- LRU eviction (entry-count and byte-based) with two-tier architecture (memory + disk)
+- TTL expiration and tag-based group invalidation with timestamps
+- Cluster-safe: automatic IPC synchronization, snapshots for new workers
+- V8 serialization (Map, Set, Date, RegExp, Error, ArrayBuffer, TypedArray)
+- File-backed persistence — evicted entries spill to disk, survive restarts
 
-### How It Works
+Works standalone (`npm run dev`), in fork mode, and in cluster mode with zero code changes. The API is identical in every mode.
 
-**Reads are always local** — `get()` is a synchronous Map lookup with zero overhead. Writes broadcast to all workers via IPC so every worker converges to the same state. Evicted entries spill to disk and can be recovered via `getAsync()`.
-
-| Mode                       | Behavior                                                |
-| -------------------------- | ------------------------------------------------------- |
-| `npm run dev` (standalone) | Local cache + disk cold layer, no IPC                   |
-| `orkify up -w 1` (fork)    | Local cache + disk cold layer, no IPC                   |
-| `orkify up -w 4` (cluster) | Broadcast cache — writes sync via IPC, reads stay local |
-| `orkify run` (foreground)  | Local cache + disk cold layer, no IPC                   |
-
-The API is identical in every mode. In standalone or fork mode, it degrades gracefully to a plain local cache — no errors, no code changes needed. You can use `@orkify/cache` during local development with `node app.js` or `npm run dev` and it works as a regular Map. Deploy with `orkify up -w 4` and the same code now syncs across workers automatically.
-
-### Configuration
-
-Optional — call `cache.configure()` before the first use of `cache`, or defaults apply:
-
-```typescript
-import { cache } from '@orkify/cache';
-
-cache.configure({
-  maxEntries: 50_000, // default: 10,000
-  defaultTtl: 300, // default: no expiry (seconds)
-  maxMemorySize: 100 * 1024 * 1024, // default: 64 MB per worker
-  maxValueSize: 2 << 20, // default: 1 MB
-});
-```
-
-| Option          | Default                 | Description                                                                    |
-| --------------- | ----------------------- | ------------------------------------------------------------------------------ |
-| `maxEntries`    | `10,000`                | Maximum entries before LRU eviction kicks in                                   |
-| `defaultTtl`    | `undefined` (no expiry) | Default TTL in seconds for entries without an explicit `ttl`                   |
-| `fileBacked`    | `true`                  | Persist evicted entries to disk, survive restarts, read via `getAsync()`       |
-| `maxMemorySize` | `67,108,864` (64 MB)    | Memory limit in bytes per worker for LRU eviction                              |
-| `maxValueSize`  | `1,048,576` (1 MB)      | Maximum byte size of a single serialized value                                 |
-| `tags`          | `undefined`             | String tags for `set()` — used with `invalidateTag()` for grouped invalidation |
-
-The cache is file-backed by default — evicted entries spill to disk and the cache survives restarts. The sync `get()` path is unaffected (pure Map lookup, zero disk I/O). Disk reads only happen on `getAsync()` for entries not in memory. To disable the disk layer: `cache.configure({ fileBacked: false })`.
-
-#### Sync vs Async Reads
-
-`get()` reads from memory only — always sync, always fast. `getAsync()` checks memory first, then falls back to disk for evicted entries:
-
-```typescript
-cache.set('key', 'value'); // stored in memory
-cache.get('key'); // sync — in-memory only
-await cache.getAsync('key'); // async — memory first, disk fallback
-
-// In async handlers, prefer getAsync to catch cold entries:
-app.get('/api/user/:id', async (req, res) => {
-  const key = `user:${req.params.id}`;
-  let user = await cache.getAsync<User>(key);
-
-  if (!user) {
-    user = await db.users.findById(req.params.id);
-    cache.set(key, user, { ttl: 300, tags: [`org:${user.orgId}`] });
-  }
-
-  res.json(user);
-});
-```
-
-With `fileBacked: false`, `getAsync()` behaves identically to `get()` — no disk I/O, just a resolved promise.
-
-### Tag-Based Invalidation
-
-Tags let you group cache entries for bulk invalidation. A key can have multiple tags, and `invalidateTag()` deletes all entries with that tag across all workers:
-
-```typescript
-// Tag entries when setting them
-cache.set('config:proj1:hostA', configA, { ttl: 300, tags: ['project:proj1'] });
-cache.set('config:proj1:hostB', configB, { ttl: 300, tags: ['project:proj1'] });
-
-// Later, invalidate everything for that project
-cache.invalidateTag('project:proj1'); // deletes both keys, syncs across workers
-```
-
-Use cases:
-
-- **Grouped config**: Invalidate all cached config for a project when settings change
-- **User sessions**: Invalidate all cached data for a user on logout
-- **Deployment**: Clear all cached data for a service on deploy
-
-Tags are strings. A key can have multiple tags (`tags: ['project:1', 'org:5']`), and invalidating either tag deletes the key. Tags are preserved across daemon restarts and survive `orkify reload`.
-
-#### Tag Timestamps
-
-Every `invalidateTag()` call records when the tag was last invalidated. Query it with `getTagExpiration()`:
-
-```typescript
-cache.invalidateTag('project:proj1');
-
-// Returns the most recent invalidation timestamp (epoch ms) across the given tags
-cache.getTagExpiration(['project:proj1']); // e.g. 1709510400000
-cache.getTagExpiration(['unknown-tag']); // 0 (never invalidated)
-
-// Multiple tags — returns the max timestamp
-cache.getTagExpiration(['project:proj1', 'org:5']); // highest of the two
-```
-
-Use `updateTagTimestamp()` to record a timestamp without deleting entries — useful for stale-while-revalidate patterns where entries stay alive but are marked for background refresh:
-
-```typescript
-cache.updateTagTimestamp('group'); // records Date.now()
-cache.updateTagTimestamp('group', futureTimestamp); // explicit timestamp
-```
-
-Tag timestamps sync across workers via IPC, persist across daemon restarts, and survive `orkify reload`.
-
-### Cluster Mode Details
-
-In cluster mode (`orkify up -w 4`), the cache uses orkify's built-in IPC:
-
-1. Worker A calls `cache.set('key', value)` → stores locally (optimistic) + sends to primary
-2. Primary stores the value, computes `expiresAt`, broadcasts to **all** workers
-3. Every worker (including A) applies the update — all converge to the same state
-
-The primary serializes writes, so concurrent sets to the same key always resolve to a consistent last-write-wins value. New workers joining (on spawn or reload) receive a full cache snapshot immediately so they start warm.
-
-### Persistence
-
-In cluster mode, the cache persists across daemon restarts and stays in memory across `orkify reload`. No configuration needed.
-
-- **`orkify reload`** — the primary stays alive, new workers receive the cache via IPC snapshot. No disk I/O, no data loss.
-- **`orkify daemon-reload`** / **`orkify kill`** — the cache is written to `~/.@orkify/cache/<name>.json` before the daemon exits. The new primary restores it on startup, so workers start warm.
-- **Worker crash** — the replacement worker gets a snapshot from the primary immediately.
-- **`orkify down`** — the cache is **not** persisted. Stopping a process is an explicit action — restoring potentially stale data (old sessions, revoked tokens, expired API responses) on a later `orkify up` would cause more problems than it solves.
-- **`orkify kill --force`** — the cache is **not** persisted. Force kill sends SIGKILL with no graceful shutdown.
-- **Daemon crash** — the cache is **not** persisted. Crash recovery restores process configs but the cache starts empty.
-
-| Scenario               | Cache behavior                                          |
-| ---------------------- | ------------------------------------------------------- |
-| `orkify reload`        | Warm — workers get snapshot from primary, zero downtime |
-| `orkify daemon-reload` | Persisted to disk, restored on new daemon startup       |
-| `orkify kill`          | Persisted to disk, restored on next daemon startup      |
-| `orkify kill --force`  | Cache lost (SIGKILL, no graceful shutdown)              |
-| Worker crash           | Replacement gets snapshot from primary                  |
-| `orkify down`          | Cache starts empty (clean slate)                        |
-| Daemon crash           | Cache starts empty (crash recovery doesn't persist)     |
-
-Cache files are stored per process at `~/.@orkify/cache/` as JSON. Tags and V8 types (Map, Set, Date, etc.) are preserved correctly across restarts.
-
-In standalone/fork mode, the cache persists to `~/.@orkify/cache/<name>/` by default and survives restarts. Use `getAsync()` to access cold entries that may be on disk. With `fileBacked: false`, the cache lives only in memory — it's gone when the process exits.
-
-The disk layer (on by default) works as follows:
-
-- Entries evicted from memory spill to disk automatically (`~/.@orkify/cache/<name>/entries/`)
-- On shutdown (`orkify kill`), remaining in-memory entries are flushed to disk
-- On startup, only the disk index is loaded — entries promote lazily to memory on access via `getAsync()`
-- Disk entries have their own TTL and tag expiration checks — stale entries are cleaned up on read and by periodic sweeps
-
-In **cluster mode**, the primary process owns the disk layer (reads and writes). Workers can read directly from disk files for fast cold reads without IPC. Writes still go through IPC to the primary.
-
-In **fork/standalone mode**, the single process owns the disk layer directly. On graceful shutdown, all in-memory entries are flushed to disk synchronously so the cache survives restarts.
-
-### Consistency Model
-
-The cache is **eventually consistent**. Other workers may read a stale value for one IPC round trip after a write. For most use cases (session data, rendered pages, API responses) this is fine. If you need strict consistency, use a database.
-
-### Eviction
-
-- **Entry-count LRU**: When `maxEntries` is reached, the least recently accessed entry is evicted on the next write
-- **Byte-based LRU**: Evicts by total memory usage (default 64 MB per worker) in addition to entry count
-- **TTL expiry**: Expired entries are cleaned up lazily on read and by a background sweep every 60 seconds
-- **Disk persistence**: Evicted entries persist on disk (by default) and are promoted back to memory on access via `getAsync()`
-- **Value size limit**: `set()` rejects values exceeding `maxValueSize` (default 1 MB) with a descriptive error
-
-### Validation
-
-`set()` validates values before storing:
-
-```typescript
-// Throws — exceeds size limit
-cache.set('huge', 'x'.repeat(2_000_000)); // Error: exceeds max 1048576 bytes
-
-// Throws — invalid TTL
-cache.set('key', 'value', { ttl: -1 }); // Error: ttl must be positive
-
-// Throws — functions and symbols are not serializable
-cache.set('fn', () => {}); // Error
-```
-
-Values can be any structured-cloneable type: plain objects, arrays, strings, numbers, booleans, `null`, `Map`, `Set`, `Date`, `RegExp`, `Error`, `ArrayBuffer`, and `TypedArray`. JSON-serializable values use JSON internally; complex types (Map, Set, Date, etc.) automatically use V8 serialization. Only functions and symbols are rejected.
+**[Full documentation: `@orkify/cache`](packages/cache/#readme)**
 
 ## Next.js
 
-orkify auto-detects Next.js apps (via `package.json` or `next.config.{ts,js,mjs}`) and provides production-grade hosting out of the box: cache handlers, security hardening, encryption key management, and deploy-time optimizations.
+orkify auto-detects Next.js apps (via `package.json` or `next.config`) and applies production hardening automatically: encryption key management, security header stripping, and version skew protection.
 
-### Packages
+For the full setup — standalone builds, static file handling, cache handlers, and error tracking — install the companion package and follow the [build & deploy guide](packages/next/#build--deploy):
 
-orkify ships two companion packages for use in your application code:
-
-- **`@orkify/cache`** — framework-agnostic shared cache (documented in [Shared Cluster Cache](#shared-cluster-cache) above)
-- **`@orkify/next`** — Next.js integration: cache handlers (`use-cache`, `isr-cache`), browser error tracking (`error-capture`, `error-handler`), and shared utilities
-
-Both are bundled with orkify and available as sub-exports. Reference them in your `next.config.ts` and application code as shown below.
-
-### Setup
-
-```typescript
-// next.config.ts
-import type { NextConfig } from 'next';
-
-const nextConfig: NextConfig = {
-  // Enable 'use cache' directives (required for Next.js 16)
-  cacheComponents: true,
-
-  // Next.js 16 'use cache' directives — backed by @orkify/cache
-  cacheHandlers: {
-    default: require.resolve('@orkify/next/use-cache'),
-  },
-
-  // ISR / route cache — backed by @orkify/cache
-  cacheHandler: require.resolve('@orkify/next/isr-cache'),
-
-  // Disable Next.js's built-in in-memory cache (orkify handles it)
-  cacheMaxMemorySize: 0,
-
-  // Version skew protection — auto-set by `orkify deploy`, optional for `orkify up/run`
-  deploymentId: process.env.NEXT_DEPLOYMENT_ID || undefined,
-};
-
-export default nextConfig;
+```bash
+npm install @orkify/next
 ```
 
-### Cache Handlers
+- **Build & deploy** — requires `output: 'standalone'` in your Next.js config and copying `public/` + `.next/static/` into the standalone directory after building.
+- **Cache handlers** — drop-in replacements for Next.js 16 `'use cache'` and ISR cache, backed by `@orkify/cache`. Tag invalidation propagates across all cluster workers. ISR request coalescing prevents duplicate revalidations.
+- **Browser error tracking** — captures `window.onerror` and unhandled rejections, normalizes cross-browser stacks to V8 format, and relays them through the regular telemetry pipeline. Zero additional API calls.
+- **Server Actions encryption** — auto-generates a stable `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` consistent across workers and reloads.
+- **Security header stripping** — blocks CVE-2025-29927 (middleware bypass) and CVE-2024-46982 (cache poisoning) by stripping dangerous headers from external requests.
+- **Version skew protection** — auto-sets `NEXT_DEPLOYMENT_ID` during deploys so old/new workers coexist safely.
 
-orkify provides drop-in cache handlers for Next.js 16. Both use the same `@orkify/cache` singleton, so tag invalidations propagate across all workers and affect both ISR and `'use cache'` entries.
-
-- **`@orkify/next/use-cache`** — handles `'use cache'` directives. Converts between Next.js's stream-based interface and orkify's synchronous cache. Implements staleness checks (hard expiry, revalidation window, soft tags).
-- **`@orkify/next/isr-cache`** — handles ISR / route cache. Simpler adapter: get, set, tag-based revalidation.
-
-Both work standalone (`npm run dev`) and in cluster mode — the cache detects the mode automatically.
-
-`revalidateTag()` calls in your Next.js app flow through orkify's cache, which broadcasts tag invalidations to all cluster workers via IPC:
-
-```typescript
-// app/actions.ts
-'use server';
-import { revalidateTag } from 'next/cache';
-
-export async function refreshPosts() {
-  revalidateTag('posts'); // invalidates across all workers
-}
-```
-
-### ISR Request Coalescing
-
-In cluster mode, multiple workers may detect the same stale cache entry simultaneously. Without coalescing, N workers trigger N parallel revalidations for the same page.
-
-orkify uses the shared cache as a distributed lock. When a worker detects staleness, it sets a short-lived `__revalidating:{key}` flag. Other workers seeing this flag serve stale content instead of triggering their own revalidation. The lock auto-expires after 30 seconds and is cleared when the fresh entry is stored.
-
-- Hard expiration: **not coalesced** (entry is genuinely expired, must be regenerated)
-- Soft tag invalidation: **not coalesced** (explicit invalidation should always miss)
-- Revalidation window: **coalesced** (stale-while-revalidate semantics)
-
-### Server Actions Encryption Key
-
-Next.js encrypts Server Action payloads. If the key differs between cluster workers or across rolling reloads, Server Actions fail with cryptic decryption errors. orkify auto-generates a stable `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` when it detects a Next.js app:
-
-- Generated once at process creation and stored in config
-- Consistent across all cluster workers (shared via `config.env`)
-- Survives reloads and daemon restarts (persisted in the snapshot file)
-- Skipped if you provide your own key via `--env` or shell environment
-
-### Security Header Stripping
-
-orkify strips dangerous headers from external requests before they reach your app:
-
-| Header                    | CVE                       | Risk                                       |
-| ------------------------- | ------------------------- | ------------------------------------------ |
-| `x-middleware-subrequest` | CVE-2025-29927 (CVSS 9.1) | Bypasses Next.js middleware authentication |
-| `x-now-route-matches`     | CVE-2024-46982            | Cache poisoning via Vercel routing         |
-
-Headers are preserved on loopback requests (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`) since Next.js uses them internally. Active in fork mode, cluster mode, and run mode with no configuration needed.
-
-### Version Skew Protection
-
-During `orkify deploy`, old and new workers coexist briefly. If client-side bundle hashes changed, a user who loaded a page from an old worker may request assets that only exist in the new version.
-
-orkify auto-sets `NEXT_DEPLOYMENT_ID` during deploy (format: `v{version}-{artifactSlice}`). Next.js uses this to tag asset URLs and handle version mismatches gracefully. The ID is passed to both the build command and runtime processes. If you set `NEXT_DEPLOYMENT_ID` in your secrets, orkify won't overwrite it.
-
-### Frontend Error Tracking
-
-orkify captures unhandled browser errors (and unhandled promise rejections) and relays them to the daemon via IPC. Errors are bundled into the regular telemetry ingest — no additional API calls are made.
-
-**Setup** requires two pieces: a client component in your root layout and a route handler.
-
-```typescript
-// app/layout.tsx
-import { OrkifyErrorCapture } from '@orkify/next/error-capture';
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html>
-      <body>
-        {children}
-        <OrkifyErrorCapture />
-      </body>
-    </html>
-  );
-}
-```
-
-```typescript
-// app/orkify/errors/route.ts
-export { POST } from '@orkify/next/error-handler';
-```
-
-The `<OrkifyErrorCapture>` component listens for `error` and `unhandledrejection` events in the browser and posts them to the route handler. The route handler validates the request and forwards the error to the daemon over IPC.
-
-**What's captured:** error name, message, stack trace, page URL, and browser user agent.
-
-**Stack normalization.** Browser engines produce different stack trace formats. orkify normalizes Firefox and Safari stacks into V8 format (`    at functionName (file:line:col)`) before forwarding, so all errors are displayed consistently on the dashboard regardless of browser.
-
-**Security.** The route handler enforces three layers of protection:
-
-- **Origin validation** — the handler requires the `Origin` header (which browsers always send on POST) and verifies it matches the app's hostname. This blocks cross-origin abuse and non-browser clients. Supports `X-Forwarded-Host` for reverse proxy setups.
-- **Rate limiting** — requests are rate-limited to 10 per 10 seconds per IP to prevent flooding.
-- **Payload validation** — strict Zod schema validation with size caps (64 KB body, 100 stack lines, field-level length limits).
-
-**Source maps.** By default, Next.js doesn't generate source maps for client bundles in production. To get resolved (non-minified) browser stacks, add `hidden-source-map` to your Next.js config — this produces `.map` files on disk without exposing them to browsers:
-
-```typescript
-// next.config.ts
-webpack: (config, { isServer }) => {
-  if (!isServer) config.devtool = 'hidden-source-map';
-  return config;
-},
-```
-
-**Error Boundary integration.** For errors caught by React Error Boundaries, use `reportError()` to forward them manually:
-
-```typescript
-// app/error.tsx
-'use client';
-import { reportError } from '@orkify/next/error-capture';
-
-export default function ErrorBoundary({ error }: { error: Error }) {
-  reportError(error);
-  return <p>Something went wrong.</p>;
-}
-```
-
-See [`examples/nextjs/`](examples/nextjs/) for a working example.
+**[Full documentation: `@orkify/next`](packages/next/#readme)** | [Example project](examples/nextjs/)
 
 ## Socket.IO / WebSocket Support
 
