@@ -31,6 +31,9 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
+  // Turbopack is default in Next.js 16; empty config silences the
+  // "webpack config without turbopack config" error during builds.
+  turbopack: {},
 };
 
 export default nextConfig;
