@@ -1,6 +1,6 @@
 {
   "name": "@orkify/cli",
-  "version": "1.0.0-beta.6",
+  "version": "1.0.0-beta.7",
   "description": "Modern JS process orchestration and deployment for your own infrastructure",
   "type": "module",
   "workspaces": [

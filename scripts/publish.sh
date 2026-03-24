@@ -148,20 +148,21 @@ fi
 bold "Version: $NEW_VERSION"
 echo ""
 
-ALL_CLEAR=true
+PUBLISH_PACKAGES=()
 for pkg in "${PACKAGES[@]}"; do
   name=$(get_name "$pkg")
   existing=$(npm_published_version "$name" "$NEW_VERSION")
   if [[ -n "$existing" ]]; then
-    red "$name@$NEW_VERSION is already published on npm"
-    ALL_CLEAR=false
+    echo "  $name@$NEW_VERSION — already published, skipping"
   else
-    green "$name@$NEW_VERSION — not yet published"
+    green "$name@$NEW_VERSION — will publish"
+    PUBLISH_PACKAGES+=("$pkg")
   fi
 done
 
-if [[ "$ALL_CLEAR" == false ]]; then
-  die "Aborting — one or more packages already published at this version"
+if [[ ${#PUBLISH_PACKAGES[@]} -eq 0 ]]; then
+  green "All packages already published at $NEW_VERSION — nothing to do"
+  exit 0
 fi
 
 echo ""
@@ -176,7 +177,7 @@ echo ""
 
 if [[ "$DRY_RUN" == true ]]; then
   bold "Dry run — would publish:"
-  for pkg in "${PACKAGES[@]}"; do
+  for pkg in "${PUBLISH_PACKAGES[@]}"; do
     name=$(get_name "$pkg")
     echo "  $name@$NEW_VERSION (tag: $TAG)"
   done
@@ -186,7 +187,7 @@ fi
 bold "Publishing to npm (tag: $TAG)..."
 echo ""
 
-for pkg in "${PACKAGES[@]}"; do
+for pkg in "${PUBLISH_PACKAGES[@]}"; do
   name=$(get_name "$pkg")
   echo -n "  $name@$NEW_VERSION ... "
   (cd "$pkg" && npm publish --access public --tag "$TAG") || die "Failed to publish $name"
@@ -197,7 +198,7 @@ echo ""
 green "All packages published successfully!"
 echo ""
 bold "Verify:"
-for pkg in "${PACKAGES[@]}"; do
+for pkg in "${PUBLISH_PACKAGES[@]}"; do
   name=$(get_name "$pkg")
   echo "  https://www.npmjs.com/package/$name"
 done
