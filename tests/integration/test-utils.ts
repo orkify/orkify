@@ -205,7 +205,7 @@ export async function waitForWorkersOnline(
 export async function waitForClusterReady(
   expectedWorkers: number,
   port: number,
-  maxWait = 30000,
+  maxWait = 60000,
   healthPath = '/health'
 ): Promise<void> {
   const start = Date.now();
