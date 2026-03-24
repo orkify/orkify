@@ -1,9 +1,13 @@
 import { execSync, spawn } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { homedir, userInfo } from 'node:os';
+import { homedir, platform, userInfo } from 'node:os';
 import { join } from 'node:path';
 
 const BIN = join(process.cwd(), 'bin', 'orkify');
+
+/** Windows CI runners are significantly slower at process spawning. */
+const IS_WINDOWS = platform() === 'win32';
+const CLUSTER_READY_TIMEOUT = IS_WINDOWS ? 60_000 : 30_000;
 
 /**
  * Execute a orkify command and return the output
@@ -205,7 +209,7 @@ export async function waitForWorkersOnline(
 export async function waitForClusterReady(
   expectedWorkers: number,
   port: number,
-  maxWait = 60000,
+  maxWait = CLUSTER_READY_TIMEOUT,
   healthPath = '/health'
 ): Promise<void> {
   const start = Date.now();
