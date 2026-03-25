@@ -117,28 +117,60 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# ── Check npm login ──────────────────────────────────────────────────────────
+
+bold "Checking npm login..."
+if ! npm whoami &>/dev/null; then
+  echo "Not logged in — opening npm login..."
+  npm login || die "npm login failed"
+fi
+green "Logged in as $(npm whoami)"
+echo ""
+
+# ── Audit ────────────────────────────────────────────────────────────────────
+
+bold "Running audit..."
+(cd "$ROOT" && npm audit --audit-level=moderate) || {
+  echo ""
+  bold "Vulnerabilities found — running npm audit fix..."
+  (cd "$ROOT" && npm audit fix) || die "npm audit fix failed"
+  (cd "$ROOT" && npm audit --audit-level=moderate) || die "Audit still failing after fix"
+  green "Audit clean after fix"
+}
+echo ""
+
 # ── Bump versions ────────────────────────────────────────────────────────────
 
 CURRENT=$(get_version "$ROOT")
 
 if [[ -n "$BUMP" ]]; then
-  NEW_VERSION=$(bump_version "$ROOT" "$BUMP" "$PREID")
-  bold "Bumping: $CURRENT → $NEW_VERSION"
+  # Check if current version is already published — if not, a previous
+  # bump already happened but publish failed. Skip bumping again.
+  CLI_NAME=$(get_name "$ROOT")
+  ALREADY_PUBLISHED=$(npm_published_version "$CLI_NAME" "$CURRENT")
 
-  for pkg in "${PACKAGES[@]}"; do
-    set_version "$pkg" "$NEW_VERSION"
-  done
+  if [[ -z "$ALREADY_PUBLISHED" ]]; then
+    bold "Current version $CURRENT is not yet published — reusing (previous bump likely failed)"
+    NEW_VERSION="$CURRENT"
+  else
+    NEW_VERSION=$(bump_version "$ROOT" "$BUMP" "$PREID")
+    bold "Bumping: $CURRENT → $NEW_VERSION"
 
-  # Update @orkify/next's dependency on @orkify/cache
-  node -e "
-    const fs = require('fs');
-    const path = '$ROOT/packages/next/package.json';
-    const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-    if (pkg.dependencies && pkg.dependencies['@orkify/cache']) {
-      pkg.dependencies['@orkify/cache'] = '^$NEW_VERSION';
-    }
-    fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
-  "
+    for pkg in "${PACKAGES[@]}"; do
+      set_version "$pkg" "$NEW_VERSION"
+    done
+
+    # Update @orkify/next's dependency on @orkify/cache
+    node -e "
+      const fs = require('fs');
+      const path = '$ROOT/packages/next/package.json';
+      const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+      if (pkg.dependencies && pkg.dependencies['@orkify/cache']) {
+        pkg.dependencies['@orkify/cache'] = '^$NEW_VERSION';
+      }
+      fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+    "
+  fi
 else
   NEW_VERSION="$CURRENT"
 fi

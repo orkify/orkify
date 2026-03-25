@@ -348,7 +348,7 @@ cache.stats(); // { size, hits, misses, hitRate, totalBytes, diskSize }
 
 Works standalone (`npm run dev`), in fork mode, and in cluster mode with zero code changes. The API is identical in every mode.
 
-**[Full documentation: `@orkify/cache`](packages/cache/#readme)**
+[![@orkify/cache](https://img.shields.io/npm/v/@orkify/cache?label=%40orkify%2Fcache)](https://www.npmjs.com/package/@orkify/cache) **[Full documentation](packages/cache/#readme)**
 
 ## Next.js
 
@@ -367,7 +367,7 @@ npm install @orkify/next
 - **Security header stripping** — blocks CVE-2025-29927 (middleware bypass) and CVE-2024-46982 (cache poisoning) by stripping dangerous headers from external requests.
 - **Version skew protection** — auto-sets `NEXT_DEPLOYMENT_ID` during deploys so old/new workers coexist safely.
 
-**[Full documentation: `@orkify/next`](packages/next/#readme)** | [Example project](examples/nextjs/)
+[![@orkify/next](https://img.shields.io/npm/v/@orkify/next?label=%40orkify%2Fnext)](https://www.npmjs.com/package/@orkify/next) **[Full documentation](packages/next/#readme)** | [Example project](examples/nextjs/)
 
 ## Socket.IO / WebSocket Support
 

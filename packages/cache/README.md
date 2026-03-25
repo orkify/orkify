@@ -254,7 +254,7 @@ Values can be any structured-cloneable type: plain objects, arrays, strings, num
 ## Requirements
 
 - Node.js 22+
-- Must run under [orkify](https://github.com/orkify/orkify) for cluster mode features
+- Must run under [![@orkify/cli](https://img.shields.io/npm/v/@orkify/cli?label=%40orkify%2Fcli)](https://www.npmjs.com/package/@orkify/cli) ([GitHub](https://github.com/orkify/orkify)) for cluster mode features
 
 ## License
 

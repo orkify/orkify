@@ -27,7 +27,7 @@ Next.js integration for [orkify](https://orkify.com) — cache handlers and brow
 npm install @orkify/next
 ```
 
-`@orkify/cache` is installed automatically as a dependency.
+[![@orkify/cache](https://img.shields.io/npm/v/@orkify/cache?label=%40orkify%2Fcache)](https://www.npmjs.com/package/@orkify/cache) is installed automatically as a dependency.
 
 ## Cache Handlers
 
@@ -249,7 +249,7 @@ orkify auto-sets `NEXT_DEPLOYMENT_ID` during deploy (format: `v{version}-{artifa
 
 - Node.js 22+
 - Next.js 15+ (16+ for `use cache`)
-- Must run under [orkify](https://github.com/orkify/orkify) for error tracking to reach the dashboard
+- Must run under [![@orkify/cli](https://img.shields.io/npm/v/@orkify/cli?label=%40orkify%2Fcli)](https://www.npmjs.com/package/@orkify/cli) ([GitHub](https://github.com/orkify/orkify)) for error tracking to reach the dashboard
 
 ## License
 
