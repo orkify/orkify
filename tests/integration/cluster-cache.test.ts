@@ -896,7 +896,8 @@ describe('Cluster Cache', () => {
       // Start process again (auto-starts new daemon)
       // New ClusterWrapper restores cache from ~/.orkify/cache/<name>.json
       orkify(`up ${scriptPath} -n ${APP_NAME} -w ${WORKERS}`);
-      await waitForClusterReady(WORKERS, PORT);
+      // Cold daemon restart is slow on Windows CI — use extended timeout
+      await waitForClusterReady(WORKERS, PORT, 90_000);
 
       // Cache should have been restored from disk and snapshot sent to workers
       const workers = await verifyAcrossWorkers(PORT, 'durable', 'persist-test');
