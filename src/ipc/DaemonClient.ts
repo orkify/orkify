@@ -43,6 +43,8 @@ export class DaemonClient {
   private streamHandlers = new Map<string, (data: unknown) => void>();
   private progressHandlers = new Map<string, (data: unknown) => void>();
   private spawnEnv: Record<string, string> = {};
+  private closedResolve: (() => void) | null = null;
+  private closedPromise: null | Promise<void> = null;
 
   async connect(): Promise<void> {
     if (this.socket) {
@@ -61,6 +63,10 @@ export class DaemonClient {
         this.cleanup();
         reject(new Error('Connection timeout'));
       }, IPC_CONNECT_TIMEOUT);
+
+      this.closedPromise = new Promise<void>((r) => {
+        this.closedResolve = r;
+      });
 
       this.socket = connect(SOCKET_PATH);
 
@@ -84,6 +90,8 @@ export class DaemonClient {
 
       this.socket.on('close', () => {
         this.cleanup();
+        this.closedResolve?.();
+        this.closedResolve = null;
       });
     });
 
@@ -307,6 +315,32 @@ export class DaemonClient {
     this.socket = null;
   }
 
+  /**
+   * Wait for the daemon to close the IPC connection.
+   * Resolves when the socket emits 'close' (daemon shut down).
+   * If the socket is already closed (or was never connected), resolves immediately.
+   */
+  waitForClose(timeoutMs = 10_000): Promise<void> {
+    const closed = this.closedPromise;
+    if (!closed) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('Timed out waiting for daemon to close connection')),
+        timeoutMs
+      );
+      closed.then(
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        () => {
+          clearTimeout(timer);
+          resolve();
+        }
+      );
+    });
+  }
+
   setSpawnEnv(env: Record<string, string>): void {
     this.spawnEnv = env;
   }
@@ -316,6 +350,10 @@ export class DaemonClient {
       this.socket.end();
       this.cleanup();
     }
+    // Resolve any pending waitForClose so callers don't hang
+    this.closedResolve?.();
+    this.closedResolve = null;
+    this.closedPromise = null;
   }
 }
 

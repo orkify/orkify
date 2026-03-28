@@ -56,6 +56,13 @@ export default tseslint.config(
     ...tseslint.configs.disableTypeChecked,
   },
   {
-    ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'examples/**', 'packages/**'],
+    ignores: [
+      'dist/**',
+      'coverage/**',
+      'node_modules/**',
+      'examples/**',
+      'packages/**',
+      'tests/systemd/**',
+    ],
   }
 );

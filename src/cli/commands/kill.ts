@@ -13,6 +13,11 @@ export const killCommand = new Command('kill')
       });
 
       if (response.success) {
+        // Wait for the daemon to close the IPC connection, which happens
+        // at the end of graceful shutdown (after PID file cleanup).
+        // Without this, callers like systemd may start a new daemon
+        // while the old one is still shutting down.
+        await daemonClient.waitForClose();
         console.log(chalk.yellow('⏹ ORKIFY daemon killed'));
       } else {
         console.error(chalk.red(`✗ Failed to kill daemon: ${response.error}`));
@@ -22,6 +27,9 @@ export const killCommand = new Command('kill')
       const message = (err as Error).message;
       if (message.includes('ECONNREFUSED') || message.includes('ENOENT')) {
         console.log(chalk.gray('Daemon is not running'));
+      } else if (message.includes('Connection closed')) {
+        // Daemon closed the connection during shutdown — expected for force kill
+        console.log(chalk.yellow('⏹ ORKIFY daemon killed'));
       } else {
         console.error(chalk.red(`✗ Error: ${message}`));
         process.exit(1);

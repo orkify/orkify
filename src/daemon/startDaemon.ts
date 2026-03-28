@@ -802,6 +802,9 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
       }
       await telemetry?.shutdown();
       await orchestrator.shutdown({ persistCache: opts?.persistCache });
+    } catch (err) {
+      console.error('Error during graceful shutdown:', (err as Error).message);
+    } finally {
       if (!skipServerStop) {
         // Remove PID file before closing the IPC server. The socket
         // disappearing is the signal tests (and CLI) use to detect
@@ -809,8 +812,6 @@ export async function startDaemon(options: DaemonOptions = {}): Promise<DaemonCo
         cleanup();
         await server.stop();
       }
-    } catch (err) {
-      console.error('Error during graceful shutdown:', (err as Error).message);
     }
   }
 
