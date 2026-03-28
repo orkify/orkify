@@ -1,7 +1,17 @@
 {
   "name": "@orkify/cli",
-  "version": "1.0.0-beta.11",
+  "version": "1.0.0-beta.12",
   "description": "Modern JS process orchestration and deployment for your own infrastructure",
+  "keywords": [
+    "process-manager",
+    "cluster",
+    "socket.io",
+    "sticky-sessions",
+    "zero-downtime",
+    "graceful-reload",
+    "node",
+    "daemon"
+  ],
   "type": "module",
   "workspaces": [
     "packages/*"
@@ -48,16 +58,6 @@
       "prettier --write"
     ]
   },
-  "keywords": [
-    "process-manager",
-    "cluster",
-    "socket.io",
-    "sticky-sessions",
-    "zero-downtime",
-    "graceful-reload",
-    "node",
-    "daemon"
-  ],
   "author": "orkify <ahoy@orkify.com>",
   "license": "Apache-2.0",
   "homepage": "https://orkify.com",

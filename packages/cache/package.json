@@ -1,7 +1,17 @@
 {
   "name": "@orkify/cache",
-  "version": "1.0.0-beta.11",
+  "version": "1.0.0-beta.12",
   "description": "Framework-agnostic shared cache for orkify-managed Node.js processes & clusters",
+  "keywords": [
+    "cache",
+    "memory-cache",
+    "ipc",
+    "lru",
+    "cluster",
+    "in-memory",
+    "ttl",
+    "nodejs"
+  ],
   "type": "module",
   "license": "Apache-2.0",
   "repository": {

@@ -1,7 +1,17 @@
 {
   "name": "@orkify/chat",
-  "version": "1.0.0-beta.11",
+  "version": "1.0.0-beta.12",
   "description": "Embeddable support chat widget for orkify — powered by Discord",
+  "keywords": [
+    "chat-widget",
+    "discord",
+    "support-chat",
+    "live-chat",
+    "customer-support",
+    "embeddable",
+    "react",
+    "nextjs"
+  ],
   "type": "module",
   "license": "Apache-2.0",
   "repository": {

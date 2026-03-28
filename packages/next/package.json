@@ -1,7 +1,17 @@
 {
   "name": "@orkify/next",
-  "version": "1.0.0-beta.11",
+  "version": "1.0.0-beta.12",
   "description": "Next.js integration for orkify — cache handlers and browser error tracking",
+  "keywords": [
+    "nextjs",
+    "cache-handler",
+    "isr",
+    "use-cache",
+    "error-tracking",
+    "source-maps",
+    "cluster",
+    "nodejs"
+  ],
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -49,7 +59,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@orkify/cache": "^1.0.0-beta.11"
+    "@orkify/cache": "^1.0.0-beta.12"
   },
   "peerDependencies": {
     "react": ">=18",
