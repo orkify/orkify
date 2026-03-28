@@ -31,6 +31,7 @@ Modern JS process orchestration and deployment for your own infrastructure.
 - [Boot Persistence](#boot-persistence)
 - [Container Mode](#container-mode)
 - [Deployment](#deployment)
+- [SaaS Platform](#saas-platform)
 - [Source Map Support](#source-map-support)
 - [Cron Scheduler](#cron-scheduler)
 - [MCP Integration](#mcp-integration)
@@ -55,6 +56,7 @@ Modern JS process orchestration and deployment for your own infrastructure.
 - **Next.js** - Auto-detection, `'use cache'` and ISR cache handlers, Server Actions encryption key, security header stripping (CVE-2025-29927), version skew protection, ISR request coalescing
 - **Modern Stack** - Pure ESM, TypeScript, Node.js 22.18+
 - **MCP Integration** - Built-in Model Context Protocol server for AI tool integration
+- **[orkify.com](https://orkify.com)** - Optional SaaS dashboard with deploy management, real-time metrics, log streaming, and remote control
 
 ## Installation
 
@@ -150,7 +152,7 @@ orkify run app.js -w 4
 --cron <spec>             Cron job (repeatable) — see Cron Scheduler
 ```
 
-`--restart-on-mem <size>` — Restart when a worker's RSS exceeds [memory threshold](#memory-threshold-restart) (e.g. 512M, 1G)
+[`--restart-on-mem <size>`](#memory-threshold-restart) — Restart when a worker's RSS exceeds threshold (e.g. `512M`, `1G`)
 
 ## Cluster Mode
 
@@ -911,7 +913,7 @@ On deploy (both local and remote), orkify **reconciles** running processes again
 
 The daemon keeps the previous release on disk. If workers crash within the monitoring window, orkify automatically rolls back to the previous version.
 
-### orkify.com Platform
+## SaaS Platform
 
 [orkify.com](https://orkify.com) is an optional paid companion that provides:
 
@@ -922,6 +924,7 @@ The daemon keeps the previous release on disk. If workers crash within the monit
 - **Remote control** — Start, stop, restart, and reload processes from the dashboard
 - **Secrets management** — Encrypted environment variables injected at deploy time
 - **Multi-server** — Manage processes across all your servers from one dashboard
+- **Support chat** — Embeddable widget that routes visitor messages to Discord — [![@orkify/chat](https://img.shields.io/npm/v/@orkify/chat?label=%40orkify%2Fchat)](https://www.npmjs.com/package/@orkify/chat)
 
 The CLI works standalone without orkify.com. Connect it by setting an API key:
 
