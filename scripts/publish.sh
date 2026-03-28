@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PACKAGES=("$ROOT/packages/cache" "$ROOT/packages/next" "$ROOT")
+PACKAGES=("$ROOT/packages/cache" "$ROOT/packages/next" "$ROOT/packages/chat" "$ROOT")
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

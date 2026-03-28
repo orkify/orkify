@@ -1,0 +1,45 @@
+{
+  "name": "@orkify/chat",
+  "version": "1.0.0-beta.8",
+  "description": "Embeddable support chat widget for orkify — powered by Discord",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orkify/orkify.git",
+    "directory": "packages/chat"
+  },
+  "homepage": "https://orkify.com",
+  "exports": {
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js",
+      "default": "./dist/react.js"
+    },
+    "./widget": "./orkify-chat.js"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "orkify-chat.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "peerDependencies": {
+    "next": ">=15",
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  }
+}
