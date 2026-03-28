@@ -1,6 +1,6 @@
 {
   "name": "@orkify/chat",
-  "version": "1.0.0-beta.8",
+  "version": "1.0.0-beta.9",
   "description": "Embeddable support chat widget for orkify — powered by Discord",
   "type": "module",
   "license": "Apache-2.0",

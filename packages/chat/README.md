@@ -188,7 +188,7 @@ For the script tag integration:
 - An [orkify](https://orkify.com) account with a paid plan
 - A Discord bot connected via the orkify dashboard (see the [setup guide](https://orkify.com/docs/discord-support-chat))
 - For the React component: React 18+ and Next.js 15+
-- Must run under [![@orkify/cli](https://img.shields.io/npm/v/@orkify/cli?label=%40orkify%2Fcli)](https://www.npmjs.com/package/@orkify/cli) ([GitHub](https://github.com/orkify/orkify)) for the backend routing
+- Messages are routed through [orkify.com](https://orkify.com) — no self-hosted backend needed
 
 ## License
 
