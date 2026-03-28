@@ -235,18 +235,22 @@ describe('Node Args and Script Args', () => {
 
 describe('Edge Cases', () => {
   it('shows meaningful output for empty process list', async () => {
-    // Kill daemon and delete all to ensure empty state
-    orkify('down all');
-    orkify('delete all');
-    await sleep(100);
+    // Ensure clean daemon state — previous tests may have left the daemon dying
+    try {
+      orkify('kill');
+    } catch {
+      // ignore — daemon may already be dead
+    }
+    await waitForDaemonKilled();
 
+    // Start a fresh daemon by running list (auto-starts daemon if needed)
     const list = orkify('list');
 
     // Should either show "No processes" or an empty table, not an error
     expect(list.toLowerCase()).not.toContain('error');
     // Should still have table headers or a "no processes" message
     expect(list.length).toBeGreaterThan(0);
-  }, 10000);
+  }, 30000);
 
   it('auto-generates process name from script path', async () => {
     const tempDir = realpathSync(mkdtempSync(join(tmpdir(), 'orkify-autoname-test-')));
