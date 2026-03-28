@@ -792,7 +792,7 @@ describe('Cluster Cache', () => {
       scriptPath = join(tempDir, 'cache-app.mjs');
     });
 
-    afterAll(() => {
+    afterAll(async () => {
       try {
         orkify(`delete ${APP_NAME}`);
       } catch {
@@ -803,6 +803,7 @@ describe('Cluster Cache', () => {
       } catch {
         // ignore
       }
+      await waitForDaemonKilled();
       const cacheDir = join(ORKIFY_HOME, 'cache');
       rmSync(cacheDir, { recursive: true, force: true });
       rmSync(tempDir, { recursive: true, force: true });
@@ -916,7 +917,7 @@ describe('Cluster Cache', () => {
       scriptPath = writeFileBackedWorkerScript(tempDir, PORT);
     });
 
-    afterAll(() => {
+    afterAll(async () => {
       try {
         orkify(`delete ${APP_NAME}`);
       } catch {
@@ -927,6 +928,7 @@ describe('Cluster Cache', () => {
       } catch {
         // ignore
       }
+      await waitForDaemonKilled();
       const cacheDir = join(ORKIFY_HOME, 'cache');
       rmSync(cacheDir, { recursive: true, force: true });
       rmSync(tempDir, { recursive: true, force: true });
@@ -1057,7 +1059,7 @@ describe('Cluster Cache', () => {
       scriptPath = writeFileBackedWorkerScript(tempDir, PORT);
     });
 
-    afterAll(() => {
+    afterAll(async () => {
       try {
         orkify(`delete ${APP_NAME}`);
       } catch {
@@ -1068,6 +1070,7 @@ describe('Cluster Cache', () => {
       } catch {
         // ignore
       }
+      await waitForDaemonKilled();
       const cacheDir = join(ORKIFY_HOME, 'cache');
       rmSync(cacheDir, { recursive: true, force: true });
       rmSync(tempDir, { recursive: true, force: true });
