@@ -10,7 +10,9 @@
     "zero-downtime",
     "graceful-reload",
     "node",
-    "daemon"
+    "daemon",
+    "cli",
+    "orkify"
   ],
   "type": "module",
   "workspaces": [

@@ -10,7 +10,8 @@
     "cluster",
     "in-memory",
     "ttl",
-    "nodejs"
+    "nodejs",
+    "orkify"
   ],
   "type": "module",
   "license": "Apache-2.0",

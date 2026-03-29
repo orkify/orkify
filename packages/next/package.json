@@ -10,7 +10,8 @@
     "error-tracking",
     "source-maps",
     "cluster",
-    "nodejs"
+    "nodejs",
+    "orkify"
   ],
   "type": "module",
   "license": "Apache-2.0",

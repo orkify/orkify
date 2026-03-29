@@ -159,7 +159,7 @@ Or with the script tag:
 
 ```html
 <script
-  src="https://orkify.com/orkify-chat.js"
+  src="https://cdn.jsdelivr.net/npm/@orkify/chat/orkify-chat.js"
   data-widget-key="YOUR_KEY"
   data-klipy-key="klipy_..."
 ></script>

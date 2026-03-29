@@ -10,7 +10,8 @@
     "customer-support",
     "embeddable",
     "react",
-    "nextjs"
+    "nextjs",
+    "orkify"
   ],
   "type": "module",
   "license": "Apache-2.0",
