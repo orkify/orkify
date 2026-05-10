@@ -14,6 +14,7 @@ Framework-agnostic shared cache for [orkify](https://orkify.com)-managed Node.js
 - [Installation](#installation)
 - [Usage](#usage)
 - [Sync vs Async Reads](#sync-vs-async-reads)
+- [Atomic Counters & Rate Limiting](#atomic-counters--rate-limiting)
 - [Configuration](#configuration)
 - [How It Works](#how-it-works)
 - [Tag-Based Invalidation](#tag-based-invalidation)
@@ -65,6 +66,11 @@ cache.getTagExpiration(['posts']);
 // Record a timestamp without deleting entries (stale-while-revalidate)
 cache.updateTagTimestamp('posts');
 
+// Atomic counter — useful for rate limits, queue depth, page views
+const count = await cache.incr('hits:home'); // 1, 2, 3, …
+await cache.incr('hits:home', 5); // bump by 5
+await cache.incr('rl:user:42:minute_42', 1, { ttlIfNew: 120 }); // self-expiring bucket
+
 // Cache stats
 const stats = cache.stats();
 // { size, hits, misses, hitRate, totalBytes, diskSize }
@@ -90,6 +96,61 @@ app.get('/api/user/:id', async (req, res) => {
   }
 
   res.json(user);
+});
+```
+
+## Atomic Counters & Rate Limiting
+
+`cache.incr(key, delta?, options?)` atomically increments an integer entry and returns the new value. In cluster mode the increment runs on the primary, so concurrent calls from many workers never lose updates — the value you get back is the true post-increment count.
+
+```typescript
+await cache.incr('counter'); // 1
+await cache.incr('counter'); // 2
+await cache.incr('counter', 10); // 12
+await cache.incr('counter', -1); // 11
+```
+
+The `ttlIfNew` option is the key to using `incr` for rate limiting. It applies only when the key is **first created** — subsequent increments do not extend the TTL. This avoids the classic Redis trap where `INCR` + `EXPIRE` keeps resetting the timer on every request, so the bucket never expires under load.
+
+```typescript
+// Sliding-window rate limiter
+async function allowRequest(apiKey: string, limitPerMinute: number) {
+  const minute = Math.floor(Date.now() / 60_000);
+  const key = `rl:${apiKey}:${minute}`;
+  const count = await cache.incr(key, 1, { ttlIfNew: 120 });
+  return count <= limitPerMinute;
+}
+```
+
+| Argument         | Default        | Notes                                                                                                         |
+| ---------------- | -------------- | ------------------------------------------------------------------------------------------------------------- |
+| `delta`          | `1`            | Must be a finite integer. Negative values decrement.                                                          |
+| `ttlIfNew`       | none           | Seconds. TTL applied **only on creation** — never resets an existing entry.                                   |
+| `timeoutMs`      | `5000`         | Cluster-mode total budget across all retry attempts. Must be positive.                                        |
+| `maxAttempts`    | `3`            | Cluster-mode retries on timeout. Must be a positive integer. Per-attempt timeout = `timeoutMs / maxAttempts`. |
+| `idempotencyKey` | auto (UUID v4) | Same key returns the same result for up to 60 seconds. Works in **all modes** (standalone, fork, cluster).    |
+
+`incr` returns `Promise<number>` in every mode (same signature in standalone, fork, and cluster) so calling code stays uniform. Throws if the existing value isn't an integer, or if `ttlIfNew`/`timeoutMs`/`maxAttempts` are invalid.
+
+### Exactly-once semantics
+
+Each `incr` call carries an idempotency key — auto-generated as a UUID, or passed explicitly via `options.idempotencyKey`. The same key returns the same result (value **or** error) for 60 seconds, regardless of how many times you call `incr`. Auto-generated keys are unique per call, so this only matters when you pass your own.
+
+In **cluster mode** this protects against the classic "primary processed it but the broadcast was slow" failure: `incr` automatically retries on timeout, and the primary recognizes the retry by its idempotency key, returning the cached result instead of incrementing again. Without this, a slow primary could quietly increment your counter while your caller saw a timeout and reported failure.
+
+In **standalone/fork mode** it makes manual retries safe — pass the same key to `incr` from a retry-aware caller (e.g., an HTTP handler that may be re-invoked from the client) and you'll see the same outcome instead of a second increment.
+
+The dedup cache is bounded to 1000 entries (oldest evicted FIFO). For burst workloads above that ceiling within a 60-second window, the oldest keys lose their guarantee — graceful degradation back to "may double-count on retry" rather than a hard failure.
+
+Use an explicit `idempotencyKey` when you want the dedup window to span beyond a single `incr` call — for example, to make an HTTP endpoint that calls `incr` safe to retry from the client:
+
+```typescript
+app.post('/api/event', async (req, res) => {
+  // Same idempotency-key header from the client → same result, even if the
+  // request was retried at the network layer.
+  const key = req.headers['idempotency-key'] ?? crypto.randomUUID();
+  const count = await cache.incr('events:total', 1, { idempotencyKey: key });
+  res.json({ count });
 });
 ```
 

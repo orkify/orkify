@@ -576,6 +576,160 @@ describe('CacheStore', () => {
     });
   });
 
+  describe('incr', () => {
+    it('on missing key returns delta (default 1) and creates the entry', () => {
+      expect(store.incr('counter')).toBe(1);
+      expect(store.get('counter')).toBe(1);
+      expect(store.has('counter')).toBe(true);
+    });
+
+    it('on missing key with explicit delta returns and stores delta', () => {
+      expect(store.incr('counter', 5)).toBe(5);
+      expect(store.get('counter')).toBe(5);
+    });
+
+    it('on existing numeric key returns previous + delta', () => {
+      store.incr('counter');
+      store.incr('counter');
+      expect(store.incr('counter')).toBe(3);
+      expect(store.get('counter')).toBe(3);
+    });
+
+    it('with explicit delta increments by that amount', () => {
+      store.incr('counter', 10);
+      expect(store.incr('counter', 5)).toBe(15);
+    });
+
+    it('with negative delta decrements', () => {
+      store.incr('counter', 10);
+      expect(store.incr('counter', -3)).toBe(7);
+      expect(store.get('counter')).toBe(7);
+    });
+
+    it('with delta=0 returns current value without changing it', () => {
+      store.incr('counter', 5);
+      expect(store.incr('counter', 0)).toBe(5);
+      expect(store.get('counter')).toBe(5);
+    });
+
+    it('with delta=0 on missing key creates entry at 0', () => {
+      expect(store.incr('counter', 0)).toBe(0);
+      expect(store.get('counter')).toBe(0);
+    });
+
+    it('throws on non-numeric existing value', () => {
+      store.set('key', 'not a number');
+      expect(() => store.incr('key')).toThrow(/not a number/i);
+    });
+
+    it('throws on non-integer existing value', () => {
+      store.set('key', 1.5);
+      expect(() => store.incr('key')).toThrow(/integer/i);
+    });
+
+    it('throws on non-integer delta', () => {
+      expect(() => store.incr('key', 1.5)).toThrow(/integer/i);
+    });
+
+    it('throws on NaN delta', () => {
+      expect(() => store.incr('key', NaN)).toThrow();
+    });
+
+    it('throws on Infinity delta', () => {
+      expect(() => store.incr('key', Infinity)).toThrow();
+    });
+
+    it('expiresAtIfNew on missing key sets expiry', () => {
+      const expiresAt = Date.now() + 60_000;
+      store.incr('counter', 1, expiresAt);
+
+      vi.advanceTimersByTime(59_000);
+      expect(store.get('counter')).toBe(1);
+
+      vi.advanceTimersByTime(2_000);
+      expect(store.get('counter')).toBeUndefined();
+    });
+
+    it('expiresAtIfNew on existing key does NOT change existing expiry', () => {
+      const originalExpiry = Date.now() + 30_000;
+      store.set('counter', 1, originalExpiry);
+
+      // Try to extend with a much longer ttl — should be ignored
+      const longerExpiry = Date.now() + 600_000;
+      store.incr('counter', 1, longerExpiry);
+
+      // Should still expire at the original time
+      vi.advanceTimersByTime(31_000);
+      expect(store.get('counter')).toBeUndefined();
+    });
+
+    it('without expiresAtIfNew on missing key creates entry with no expiry', () => {
+      store.incr('counter');
+      vi.advanceTimersByTime(3_600_000);
+      expect(store.get('counter')).toBe(1);
+    });
+
+    it('treats an expired key as missing (fresh start with delta + expiresAtIfNew)', () => {
+      store.set('counter', 99, Date.now() + 1000);
+      vi.advanceTimersByTime(1001);
+
+      // Old entry is expired — incr should start fresh
+      expect(store.incr('counter', 5)).toBe(5);
+      expect(store.get('counter')).toBe(5);
+    });
+
+    it('preserves existing tags on subsequent incr', () => {
+      store.set('counter', 1, undefined, ['rl', 'user:42']);
+      store.incr('counter');
+      store.incr('counter');
+
+      // Tags should still resolve the key
+      const deleted = store.invalidateTag('rl');
+      expect(deleted).toEqual(['counter']);
+    });
+
+    it('updates lastAccessedAt so it is not falsely evicted as cold', () => {
+      const small = new CacheStore({ maxEntries: 2 });
+
+      small.set('a', 1);
+      vi.advanceTimersByTime(10);
+      small.set('counter', 0);
+      vi.advanceTimersByTime(10);
+
+      // Bump counter — should refresh its LRU position
+      small.incr('counter');
+      vi.advanceTimersByTime(10);
+
+      // Insert third entry: 'a' should be evicted, not 'counter'
+      small.set('c', 3);
+      expect(small.get('a')).toBeUndefined();
+      expect(small.get('counter')).toBe(1);
+
+      small.destroy();
+    });
+
+    it('byte accounting stays bounded across many incrs (no per-incr leak)', () => {
+      store.incr('counter');
+      expect(store.stats().totalBytes).toBeGreaterThan(0);
+
+      for (let i = 0; i < 100; i++) store.incr('counter');
+
+      // One entry holding a single integer — bytes must stay bounded by a
+      // small constant (V8-serialized integer), not grow per-incr.
+      const after = store.stats().totalBytes;
+      expect(after).toBeLessThan(32);
+      expect(store.get('counter')).toBe(101);
+      expect(store.stats().size).toBe(1);
+    });
+
+    it('returned value matches stored value (post-increment, not pre)', () => {
+      store.incr('counter', 7);
+      const returned = store.incr('counter', 3);
+      expect(returned).toBe(10);
+      expect(store.get('counter')).toBe(returned);
+    });
+  });
+
   describe('onEvict callback', () => {
     it('calls onEvict with lru reason on eviction', () => {
       const evicted: Array<{ key: string; reason: string }> = [];

@@ -95,6 +95,50 @@ export class CacheStore implements ICacheStore {
     return true;
   }
 
+  incr(key: string, delta: number = 1, expiresAtIfNew?: number): number {
+    if (!Number.isInteger(delta)) {
+      throw new Error(`cache.incr: delta must be a finite integer, got ${delta}`);
+    }
+
+    const entry = this.entries.get(key);
+    const isExpired = entry?.expiresAt !== undefined && entry.expiresAt < Date.now();
+
+    // Missing or expired → fresh entry with delta as the value
+    if (!entry || isExpired) {
+      if (entry) this.removeEntry(key, entry);
+      this.set(key, delta, expiresAtIfNew, undefined);
+      return delta;
+    }
+
+    // Existing live entry — must be an integer to increment
+    if (typeof entry.value !== 'number') {
+      throw new Error(
+        `cache.incr: existing value at "${key}" is not a number (got ${typeof entry.value})`
+      );
+    }
+    if (!Number.isInteger(entry.value)) {
+      throw new Error(
+        `cache.incr: existing value at "${key}" is not an integer (got ${entry.value})`
+      );
+    }
+
+    const newValue = entry.value + delta;
+    const newByteSize = serializedByteLength(serialize(newValue));
+
+    // Mutate in place — preserves tags and expiresAt
+    this.totalBytes += newByteSize - entry.byteSize;
+    entry.byteSize = newByteSize;
+    entry.value = newValue;
+    entry.lastAccessedAt = Date.now();
+
+    // Rare: integer grew enough to push us over a byte limit. Evict cold entries.
+    while (this.totalBytes > this.maxMemorySize) {
+      if (!this.evictLru()) break;
+    }
+
+    return newValue;
+  }
+
   clear(): void {
     this.entries.clear();
     this.tagIndex.clear();
@@ -110,6 +154,13 @@ export class CacheStore implements ICacheStore {
       return false;
     }
     return true;
+  }
+
+  getEntryMeta(key: string): { expiresAt?: number; tags?: string[] } | undefined {
+    const entry = this.entries.get(key);
+    if (!entry) return undefined;
+    if (entry.expiresAt !== undefined && entry.expiresAt < Date.now()) return undefined;
+    return { expiresAt: entry.expiresAt, tags: entry.tags };
   }
 
   stats(): CacheStats {

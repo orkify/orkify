@@ -165,7 +165,7 @@ chore: update dependencies
 - `@orkify/cache` exposes a shared cache singleton via a lazy Proxy
 - In cluster mode (`ORKIFY_CLUSTER_MODE=true` + `process.send`): writes broadcast via IPC through `CachePrimary`, reads are local Map lookups
 - In standalone/fork/run mode: plain local Map, no IPC
-- Features: LRU eviction (entry-count and byte-based), TTL, tag-based invalidation, tag timestamps, V8 serialization (Map/Set/Date)
+- Features: LRU eviction (entry-count and byte-based), TTL, tag-based invalidation, tag timestamps, V8 serialization (Map/Set/Date), atomic `incr()` with auto-retry + idempotency dedup on the primary
 - Two-tier architecture (`fileBacked: true`): in-memory hot layer + file-backed cold layer. Evicted entries spill to disk, promote back to memory via `getAsync()`. In cluster mode, only the primary does file I/O.
 - Config: `maxMemorySize` (bytes) enables byte-based LRU; `fileBacked` enables the cold disk layer
 - Snapshots sent to new workers on spawn; persisted to disk on `orkify kill` / `orkify daemon-reload`

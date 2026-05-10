@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import type {
   CacheBroadcastClearMessage,
   CacheBroadcastDeleteMessage,
+  CacheBroadcastIncrResultMessage,
   CacheBroadcastInvalidateTagMessage,
   CacheBroadcastSetMessage,
   CacheBroadcastUpdateTagTimestampMessage,
@@ -13,11 +15,40 @@ import type {
 import { CACHE_DEFAULT_MAX_VALUE_SIZE } from './constants.js';
 import { CacheFileStore } from './CacheFileStore.js';
 import { CacheStore } from './CacheStore.js';
+import { IncrDedupCache } from './IncrDedupCache.js';
 import { serialize, serializedByteLength } from './serialize.js';
+
+const DEFAULT_INCR_TIMEOUT_MS = 5000;
+const DEFAULT_INCR_MAX_ATTEMPTS = 3;
+
+export interface CacheIncrOptions {
+  /** Override the auto-generated idempotency key (e.g., to dedup retries from an HTTP request). */
+  idempotencyKey?: string;
+  /** Max retry attempts on timeout (default 3). Each attempt gets timeoutMs/maxAttempts. */
+  maxAttempts?: number;
+  /** Total time budget across all attempts (default 5000 ms). */
+  timeoutMs?: number;
+  /** TTL in seconds applied only when the key is created. Subsequent incrs do not extend it. */
+  ttlIfNew?: number;
+}
+
+export class IncrTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'IncrTimeoutError';
+  }
+}
+
+interface PendingIncr {
+  reject: (err: Error) => void;
+  resolve: (value: number) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
 
 type CacheInboundMessage =
   | CacheBroadcastClearMessage
   | CacheBroadcastDeleteMessage
+  | CacheBroadcastIncrResultMessage
   | CacheBroadcastInvalidateTagMessage
   | CacheBroadcastSetMessage
   | CacheBroadcastUpdateTagTimestampMessage
@@ -26,8 +57,11 @@ type CacheInboundMessage =
 export class CacheClient {
   private clusterMode: boolean;
   private defaultTtl: number | undefined;
+  private incrDedup = new IncrDedupCache();
   private maxValueSize: number;
   private messageHandler: ((msg: unknown) => void) | undefined;
+  private nextRequestId = 0;
+  private pendingIncrs = new Map<number, PendingIncr>();
   private store: ICacheStore;
 
   constructor(config?: CacheConfig, bufferedMessages?: unknown[]) {
@@ -140,6 +174,103 @@ export class CacheClient {
     }
   }
 
+  async incr(key: string, delta: number = 1, options?: CacheIncrOptions): Promise<number> {
+    if (options?.ttlIfNew !== undefined && options.ttlIfNew <= 0) {
+      throw new Error(`cache.incr: ttlIfNew must be positive, got ${options.ttlIfNew}`);
+    }
+    if (options?.timeoutMs !== undefined && options.timeoutMs <= 0) {
+      throw new Error(`cache.incr: timeoutMs must be positive, got ${options.timeoutMs}`);
+    }
+    if (
+      options?.maxAttempts !== undefined &&
+      (!Number.isInteger(options.maxAttempts) || options.maxAttempts <= 0)
+    ) {
+      throw new Error(
+        `cache.incr: maxAttempts must be a positive integer, got ${options.maxAttempts}`
+      );
+    }
+
+    const idempotencyKey = options?.idempotencyKey ?? randomUUID();
+
+    if (!this.clusterMode) {
+      // Dedup in standalone too — same idempotencyKey returns the same result
+      // (success or error) for the dedup TTL window. Auto-generated UUIDs never
+      // collide so this only fires for caller-supplied keys.
+      const cached = this.incrDedup.get(idempotencyKey);
+      if (cached) {
+        if (cached.error !== undefined) throw new Error(cached.error);
+        return cached.value;
+      }
+      try {
+        const expiresAtIfNew = options?.ttlIfNew ? Date.now() + options.ttlIfNew * 1000 : undefined;
+        const value = this.store.incr(key, delta, expiresAtIfNew);
+        this.incrDedup.record(idempotencyKey, { value });
+        return value;
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        this.incrDedup.record(idempotencyKey, { error: errorMsg });
+        throw err;
+      }
+    }
+
+    const totalBudget = options?.timeoutMs ?? DEFAULT_INCR_TIMEOUT_MS;
+    const maxAttempts = options?.maxAttempts ?? DEFAULT_INCR_MAX_ATTEMPTS;
+    const perAttemptMs = Math.max(1, Math.floor(totalBudget / maxAttempts));
+
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await this.sendIncrAttempt(
+          key,
+          delta,
+          options?.ttlIfNew,
+          idempotencyKey,
+          perAttemptMs
+        );
+      } catch (err) {
+        if (!(err instanceof IncrTimeoutError)) throw err;
+        lastError = err;
+      }
+    }
+    throw new Error(
+      `cache.incr: exhausted ${maxAttempts} attempts (${totalBudget}ms total): ${lastError?.message ?? 'no response from primary'}`
+    );
+  }
+
+  private sendIncrAttempt(
+    key: string,
+    delta: number,
+    ttlIfNew: number | undefined,
+    idempotencyKey: string,
+    timeoutMs: number
+  ): Promise<number> {
+    const requestId = ++this.nextRequestId;
+    return new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingIncrs.delete(requestId);
+        reject(
+          new IncrTimeoutError(
+            `cache.incr: timed out waiting for primary response after ${timeoutMs}ms`
+          )
+        );
+      }, timeoutMs);
+      timer.unref?.();
+
+      this.pendingIncrs.set(requestId, { resolve, reject, timer });
+
+      this.trySend({
+        __orkify: true,
+        type: 'cache:incr',
+        key,
+        delta,
+        ttlIfNew,
+        idempotencyKey,
+        originatorPid: process.pid,
+        requestId,
+      });
+    });
+  }
+
   clear(): void {
     this.store.clear();
 
@@ -182,6 +313,13 @@ export class CacheClient {
       process.removeListener('message', this.messageHandler);
       this.messageHandler = undefined;
     }
+    // Reject any in-flight incrs so callers don't hang
+    for (const pending of this.pendingIncrs.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('cache.incr: client destroyed before primary responded'));
+    }
+    this.pendingIncrs.clear();
+    this.incrDedup.destroy();
     this.store.destroy();
   }
 
@@ -222,6 +360,29 @@ export class CacheClient {
           tagTimestamps: message.tagTimestamps,
         });
         break;
+      case 'cache:incr-result': {
+        // Apply value locally so this worker stays in sync with the primary
+        // (broadcast goes to all workers, including non-originators).
+        if (message.value !== undefined) {
+          this.store.applySet(message.key, message.value, message.expiresAt, message.tags);
+        }
+        // Resolve/reject the originating worker's pending promise. Match on
+        // (pid, requestId) — workers each have their own counter, so a bare
+        // requestId is not unique across the cluster.
+        if (message.originatorPid === process.pid) {
+          const pending = this.pendingIncrs.get(message.requestId);
+          if (pending) {
+            clearTimeout(pending.timer);
+            this.pendingIncrs.delete(message.requestId);
+            if (message.error) {
+              pending.reject(new Error(message.error));
+            } else if (message.value !== undefined) {
+              pending.resolve(message.value);
+            }
+          }
+        }
+        break;
+      }
     }
   }
 }

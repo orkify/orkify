@@ -173,6 +173,21 @@ export class CacheFileStore implements ICacheStore {
     return memDeleted || diskHad;
   }
 
+  getEntryMeta(key: string): { expiresAt?: number; tags?: string[] } | undefined {
+    return this.store.getEntryMeta(key);
+  }
+
+  incr(key: string, delta: number = 1, expiresAtIfNew?: number): number {
+    // Counters that have spilled to disk cannot be read synchronously — drop the
+    // stale on-disk copy and start fresh in memory. Hot counters (rate limits,
+    // queue depths) stay in memory by virtue of constant access, so this only
+    // affects long-cold counters, which are not the use case incr is built for.
+    if (this.diskIndex.has(key) && !this.store.has(key)) {
+      void this.deleteFromDisk(key);
+    }
+    return this.store.incr(key, delta, expiresAtIfNew);
+  }
+
   clear(): void {
     this.store.clear();
     // Clear all disk entries

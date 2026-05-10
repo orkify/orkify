@@ -211,6 +211,566 @@ describe('CachePrimary', () => {
     });
   });
 
+  describe('handleMessage — cache:incr', () => {
+    it('increments and broadcasts cache:incr-result with new value to all workers', () => {
+      const w1 = createMockWorker();
+      const w2 = createMockWorker();
+      const workers = buildWorkers(w1, w2);
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          idempotencyKey: 'idem-p1',
+          originatorPid: 1234,
+          requestId: 7,
+        },
+        workers
+      );
+
+      const expected = expect.objectContaining({
+        __orkify: true,
+        type: 'cache:incr-result',
+        key: 'counter',
+        value: 1,
+        requestId: 7,
+      });
+      expect(w1.send).toHaveBeenCalledWith(expected);
+      expect(w2.send).toHaveBeenCalledWith(expected);
+    });
+
+    it('subsequent incrs accumulate and return the new value', () => {
+      const w1 = createMockWorker();
+      const workers = buildWorkers(w1);
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k',
+          delta: 5,
+          idempotencyKey: 'idem-p2',
+          originatorPid: 1234,
+          requestId: 1,
+        },
+        workers
+      );
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k',
+          delta: 3,
+          idempotencyKey: 'idem-p3',
+          originatorPid: 1234,
+          requestId: 2,
+        },
+        workers
+      );
+
+      const lastCall = w1.send.mock.calls.at(-1)?.[0];
+      expect(lastCall).toMatchObject({
+        type: 'cache:incr-result',
+        key: 'k',
+        value: 8,
+        requestId: 2,
+      });
+    });
+
+    it('honors negative delta (decrement)', () => {
+      const w1 = createMockWorker();
+      const workers = buildWorkers(w1);
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k',
+          delta: 10,
+          idempotencyKey: 'idem-p4',
+          originatorPid: 1234,
+          requestId: 1,
+        },
+        workers
+      );
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k',
+          delta: -4,
+          idempotencyKey: 'idem-p5',
+          originatorPid: 1234,
+          requestId: 2,
+        },
+        workers
+      );
+
+      const lastCall = w1.send.mock.calls.at(-1)?.[0];
+      expect(lastCall.value).toBe(6);
+    });
+
+    it('ttlIfNew applied only on creation (subsequent incrs do not extend)', () => {
+      const w1 = createMockWorker();
+      const workers = buildWorkers(w1);
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k',
+          delta: 1,
+          ttlIfNew: 1,
+          idempotencyKey: 'idem-p6',
+          originatorPid: 1234,
+          requestId: 1,
+        },
+        workers
+      );
+
+      const firstCall = w1.send.mock.calls[0][0];
+      expect(firstCall.expiresAt).toBeGreaterThan(Date.now());
+      const originalExpiresAt = firstCall.expiresAt;
+
+      // Subsequent incr with longer ttlIfNew should not extend the expiry
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k',
+          delta: 1,
+          ttlIfNew: 600,
+          idempotencyKey: 'idem-p7',
+          originatorPid: 1234,
+          requestId: 2,
+        },
+        workers
+      );
+
+      const secondCall = w1.send.mock.calls.at(-1)?.[0];
+      expect(secondCall.expiresAt).toBe(originalExpiresAt);
+    });
+
+    it('broadcasts error result for non-numeric existing value', () => {
+      const w1 = createMockWorker();
+      const w2 = createMockWorker();
+      const workers = buildWorkers(w1, w2);
+
+      // Pre-populate with a string value
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:set', key: 'k', value: 'not a number' },
+        workers
+      );
+      w1.send.mockClear();
+      w2.send.mockClear();
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k',
+          delta: 1,
+          idempotencyKey: 'idem-p8',
+          originatorPid: 1234,
+          requestId: 9,
+        },
+        workers
+      );
+
+      // Originating worker gets the error
+      expect(w1.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'cache:incr-result',
+          key: 'k',
+          requestId: 9,
+          error: expect.stringMatching(/not a number/),
+        })
+      );
+      // Non-originating worker should not receive the error result
+      // (only the originator can act on it; broadcasting errors is noise)
+      expect(w2.send).not.toHaveBeenCalled();
+    });
+
+    it('skips disconnected workers on incr broadcast', () => {
+      const connected = createMockWorker(true);
+      const disconnected = createMockWorker(false);
+      const workers = buildWorkers(connected, disconnected);
+
+      primary.handleMessage(
+        connected as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k',
+          delta: 1,
+          idempotencyKey: 'idem-p9',
+          originatorPid: 1234,
+          requestId: 1,
+        },
+        workers
+      );
+
+      expect(connected.send).toHaveBeenCalled();
+      expect(disconnected.send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handleMessage — cache:incr idempotency dedup', () => {
+    it('same idempotencyKey returns cached value without re-incrementing', () => {
+      const w1 = createMockWorker();
+      const workers = buildWorkers(w1);
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          idempotencyKey: 'idem-A',
+          originatorPid: 1234,
+          requestId: 1,
+        },
+        workers
+      );
+      const firstCall = w1.send.mock.calls[0][0];
+      expect(firstCall.value).toBe(1);
+
+      w1.send.mockClear();
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          idempotencyKey: 'idem-A',
+          originatorPid: 1234,
+          requestId: 2,
+        },
+        workers
+      );
+
+      expect(w1.send).toHaveBeenCalledTimes(1);
+      const secondCall = w1.send.mock.calls[0][0];
+      expect(secondCall.value).toBe(1); // unchanged — no second increment
+      expect(secondCall.requestId).toBe(2); // echoes the new requestId
+      expect(secondCall.idempotencyKey).toBe('idem-A');
+    });
+
+    it('different idempotencyKey on the same key performs a fresh increment', () => {
+      const w1 = createMockWorker();
+      const workers = buildWorkers(w1);
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          idempotencyKey: 'idem-A',
+          originatorPid: 1234,
+          requestId: 1,
+        },
+        workers
+      );
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          idempotencyKey: 'idem-B',
+          originatorPid: 1234,
+          requestId: 2,
+        },
+        workers
+      );
+
+      const lastCall = w1.send.mock.calls.at(-1)?.[0];
+      expect(lastCall.value).toBe(2);
+    });
+
+    it('cached error replays even after the underlying state is fixed', () => {
+      const w1 = createMockWorker();
+      const workers = buildWorkers(w1);
+
+      // Pre-populate non-numeric so first incr errors
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:set', key: 'k', value: 'not-a-number' },
+        workers
+      );
+      w1.send.mockClear();
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k',
+          delta: 1,
+          idempotencyKey: 'idem-err',
+          originatorPid: 1234,
+          requestId: 1,
+        },
+        workers
+      );
+      expect(w1.send.mock.calls[0][0].error).toMatch(/not a number/);
+
+      // CHANGE state so a fresh execution would succeed
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        { __orkify: true, type: 'cache:set', key: 'k', value: 5 },
+        workers
+      );
+      w1.send.mockClear();
+
+      // Retry with same idempotencyKey → still returns CACHED error, not new success
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k',
+          delta: 1,
+          idempotencyKey: 'idem-err',
+          originatorPid: 1234,
+          requestId: 2,
+        },
+        workers
+      );
+
+      expect(w1.send).toHaveBeenCalledTimes(1);
+      const retryCall = w1.send.mock.calls[0][0];
+      expect(retryCall.error).toMatch(/not a number/);
+      expect(retryCall.requestId).toBe(2);
+
+      // Sanity: a different idempotencyKey runs fresh against the new state
+      w1.send.mockClear();
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k',
+          delta: 1,
+          idempotencyKey: 'idem-fresh',
+          originatorPid: 1234,
+          requestId: 3,
+        },
+        workers
+      );
+      expect(w1.send.mock.calls.at(-1)?.[0].value).toBe(6);
+    });
+
+    it('dedup HIT replies only to the originator, not to other workers', () => {
+      const w1 = createMockWorker();
+      const w2 = createMockWorker();
+      const workers = buildWorkers(w1, w2);
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          idempotencyKey: 'idem-X',
+          originatorPid: 1234,
+          requestId: 1,
+        },
+        workers
+      );
+      expect(w2.send).toHaveBeenCalledTimes(1); // got original broadcast
+      w1.send.mockClear();
+      w2.send.mockClear();
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          idempotencyKey: 'idem-X',
+          originatorPid: 1234,
+          requestId: 2,
+        },
+        workers
+      );
+
+      expect(w1.send).toHaveBeenCalledTimes(1);
+      expect(w2.send).not.toHaveBeenCalled();
+    });
+
+    it('dedup hits within TTL window, misses after sweep', () => {
+      const w1 = createMockWorker();
+      const workers = buildWorkers(w1);
+
+      // First call — increments to 1, caches under idem-Y
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          idempotencyKey: 'idem-Y',
+          originatorPid: 1234,
+          requestId: 1,
+        },
+        workers
+      );
+
+      // Within TTL window — dedup HIT, value stays at 1
+      vi.advanceTimersByTime(30_000);
+      w1.send.mockClear();
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          idempotencyKey: 'idem-Y',
+          originatorPid: 1234,
+          requestId: 2,
+        },
+        workers
+      );
+      expect(w1.send.mock.calls.at(-1)?.[0].value).toBe(1);
+
+      // Advance past dedup TTL (60s) + sweep interval — entry should be gone
+      vi.advanceTimersByTime(120_001);
+      w1.send.mockClear();
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          idempotencyKey: 'idem-Y',
+          originatorPid: 1234,
+          requestId: 3,
+        },
+        workers
+      );
+
+      // Now a fresh increment — value goes from 1 → 2
+      expect(w1.send.mock.calls.at(-1)?.[0].value).toBe(2);
+    });
+
+    it('dedup cache evicts oldest entry at max size (FIFO)', () => {
+      const w1 = createMockWorker();
+      const workers = buildWorkers(w1);
+
+      // Fill dedup cache past max (1000) — forces FIFO eviction of idem-0
+      for (let i = 0; i < 1001; i++) {
+        primary.handleMessage(
+          w1 as unknown as import('node:cluster').Worker,
+          {
+            __orkify: true,
+            type: 'cache:incr',
+            key: `k-${i}`,
+            delta: 1,
+            idempotencyKey: `idem-${i}`,
+            originatorPid: 1234,
+            requestId: i,
+          },
+          workers
+        );
+      }
+      w1.send.mockClear();
+
+      // Oldest entry (idem-0) was evicted — retry performs fresh increment (1 → 2)
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k-0',
+          delta: 1,
+          idempotencyKey: 'idem-0',
+          originatorPid: 1234,
+          requestId: 9999,
+        },
+        workers
+      );
+      expect(w1.send.mock.calls.at(-1)?.[0].value).toBe(2);
+
+      // A more recent entry (idem-1000) should still be in dedup — returns cached value
+      w1.send.mockClear();
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'k-1000',
+          delta: 1,
+          idempotencyKey: 'idem-1000',
+          originatorPid: 1234,
+          requestId: 10000,
+        },
+        workers
+      );
+      expect(w1.send.mock.calls.at(-1)?.[0].value).toBe(1); // cached, no re-incr
+    });
+
+    it('preserves expiresAt and tags in dedup-cached result', () => {
+      const w1 = createMockWorker();
+      const workers = buildWorkers(w1);
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          ttlIfNew: 60,
+          idempotencyKey: 'idem-Z',
+          originatorPid: 1234,
+          requestId: 1,
+        },
+        workers
+      );
+      const firstExpiresAt = w1.send.mock.calls[0][0].expiresAt;
+      w1.send.mockClear();
+
+      primary.handleMessage(
+        w1 as unknown as import('node:cluster').Worker,
+        {
+          __orkify: true,
+          type: 'cache:incr',
+          key: 'counter',
+          delta: 1,
+          idempotencyKey: 'idem-Z',
+          originatorPid: 1234,
+          requestId: 2,
+        },
+        workers
+      );
+      const cachedReply = w1.send.mock.calls[0][0];
+      expect(cachedReply.expiresAt).toBe(firstExpiresAt);
+    });
+  });
+
   describe('sendSnapshot', () => {
     it('sends all entries to a worker', () => {
       const w1 = createMockWorker();

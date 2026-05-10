@@ -3,6 +3,7 @@ import type { CacheConfig, CacheWorkerMessage, ICacheStore } from './types.js';
 import { CacheFileStore } from './CacheFileStore.js';
 import { CachePersistence } from './CachePersistence.js';
 import { CacheStore } from './CacheStore.js';
+import { IncrDedupCache } from './IncrDedupCache.js';
 
 interface WorkerState {
   worker: Worker;
@@ -10,6 +11,7 @@ interface WorkerState {
 
 export class CachePrimary {
   private fileBacked: boolean;
+  private incrDedup = new IncrDedupCache();
   private persistence: CachePersistence;
   private processName: string;
   private store: ICacheStore;
@@ -100,6 +102,76 @@ export class CachePrimary {
         this.applyConfig(msg.config);
         break;
       }
+      case 'cache:incr': {
+        // Idempotency check: if we've seen this idempotencyKey before, replay the
+        // cached result to the originator only. Other workers got the original
+        // broadcast and don't need a second copy.
+        const cached = this.incrDedup.get(msg.idempotencyKey);
+        if (cached) {
+          if (_worker.isConnected()) {
+            _worker.send({
+              __orkify: true,
+              type: 'cache:incr-result',
+              key: msg.key,
+              value: cached.value,
+              expiresAt: cached.expiresAt,
+              tags: cached.tags,
+              error: cached.error,
+              originatorPid: msg.originatorPid,
+              requestId: msg.requestId,
+              idempotencyKey: msg.idempotencyKey,
+            });
+          }
+          break;
+        }
+
+        const expiresAtIfNew = msg.ttlIfNew ? Date.now() + msg.ttlIfNew * 1000 : undefined;
+        let value: number;
+        try {
+          value = this.store.incr(msg.key, msg.delta, expiresAtIfNew);
+        } catch (err) {
+          // Reply only to the originator — non-originating workers can't act on
+          // an error they didn't request, and broadcasting it is just noise.
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          this.incrDedup.record(msg.idempotencyKey, { error: errorMsg });
+          if (_worker.isConnected()) {
+            _worker.send({
+              __orkify: true,
+              type: 'cache:incr-result',
+              key: msg.key,
+              originatorPid: msg.originatorPid,
+              requestId: msg.requestId,
+              idempotencyKey: msg.idempotencyKey,
+              error: errorMsg,
+            });
+          }
+          break;
+        }
+
+        const meta = this.store.getEntryMeta(msg.key);
+        this.incrDedup.record(msg.idempotencyKey, {
+          value,
+          expiresAt: meta?.expiresAt,
+          tags: meta?.tags,
+        });
+        const broadcast = {
+          __orkify: true,
+          type: 'cache:incr-result',
+          key: msg.key,
+          value,
+          expiresAt: meta?.expiresAt,
+          tags: meta?.tags,
+          originatorPid: msg.originatorPid,
+          requestId: msg.requestId,
+          idempotencyKey: msg.idempotencyKey,
+        };
+        for (const [, state] of allWorkers) {
+          if (state.worker.isConnected()) {
+            state.worker.send(broadcast);
+          }
+        }
+        break;
+      }
     }
   }
 
@@ -162,6 +234,7 @@ export class CachePrimary {
   }
 
   destroy(): void {
+    this.incrDedup.destroy();
     this.store.destroy();
   }
 

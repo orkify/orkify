@@ -41,6 +41,11 @@ export interface CacheSnapshot {
 
 export type EvictReason = 'expired' | 'lru';
 
+export interface CacheEntryMeta {
+  expiresAt?: number;
+  tags?: string[];
+}
+
 export interface ICacheStore {
   applyDelete(key: string): void;
   applySet(key: string, value: unknown, expiresAt?: number, tags?: string[]): void;
@@ -51,8 +56,10 @@ export interface ICacheStore {
   destroy(): void;
   get<T>(key: string): T | undefined;
   getAsync<T>(key: string): Promise<T | undefined>;
+  getEntryMeta(key: string): CacheEntryMeta | undefined;
   getTagExpiration(tags: string[]): number;
   has(key: string): boolean;
+  incr(key: string, delta?: number, expiresAtIfNew?: number): number;
   invalidateTag(tag: string): string[];
   serialize(): CacheSnapshot;
   set(
@@ -105,10 +112,22 @@ export interface CacheConfigureMessage {
   type: 'cache:configure';
 }
 
+export interface CacheIncrMessage {
+  __orkify: true;
+  delta: number;
+  idempotencyKey: string;
+  key: string;
+  originatorPid: number;
+  requestId: number;
+  ttlIfNew?: number; // seconds
+  type: 'cache:incr';
+}
+
 export type CacheWorkerMessage =
   | CacheClearMessage
   | CacheConfigureMessage
   | CacheDeleteMessage
+  | CacheIncrMessage
   | CacheInvalidateTagMessage
   | CacheSetMessage
   | CacheUpdateTagTimestampMessage;
@@ -153,4 +172,17 @@ export interface CacheSnapshotMessage {
   entries: Array<[string, SerializedCacheEntry]>;
   tagTimestamps: Array<[string, number]>;
   type: 'cache:snapshot';
+}
+
+export interface CacheBroadcastIncrResultMessage {
+  __orkify: true;
+  error?: string;
+  expiresAt?: number;
+  idempotencyKey: string;
+  key: string;
+  originatorPid: number;
+  requestId: number;
+  tags?: string[];
+  type: 'cache:incr-result';
+  value?: number;
 }

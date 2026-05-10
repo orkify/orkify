@@ -338,6 +338,7 @@ cache.set('user:123', userData, { ttl: 300 }); // write + broadcast
 cache.set('key', value, { ttl: 300, tags: ['group'] }); // with tags
 cache.get<User>('user:123'); // sync — in-memory only
 await cache.getAsync<User>('user:123'); // async — memory first, then disk
+await cache.incr('rl:user:42', 1, { ttlIfNew: 60 }); // atomic counter / rate limit
 cache.invalidateTag('group'); // bulk invalidation across workers
 cache.stats(); // { size, hits, misses, hitRate, totalBytes, diskSize }
 ```
@@ -345,10 +346,18 @@ cache.stats(); // { size, hits, misses, hitRate, totalBytes, diskSize }
 - LRU eviction (entry-count and byte-based) with two-tier architecture (memory + disk)
 - TTL expiration and tag-based group invalidation with timestamps
 - Cluster-safe: automatic IPC synchronization, snapshots for new workers
+- Atomic `incr()` for counters and rate limits — see below
 - V8 serialization (Map, Set, Date, RegExp, Error, ArrayBuffer, TypedArray)
 - File-backed persistence — evicted entries spill to disk, survive restarts
 
 Works standalone (`npm run dev`), in fork mode, and in cluster mode with zero code changes. The API is identical in every mode.
+
+**`cache.incr(key, delta?, { ttlIfNew? })`** atomically bumps an integer entry and returns the new value. In cluster mode the increment runs on the primary, so concurrent calls from many workers never lose updates. `ttlIfNew` applies **only on creation** — subsequent increments don't reset the timer. That makes it a one-line rate-limit bucket without the classic Redis `INCR` + `EXPIRE` race:
+
+```typescript
+const count = await cache.incr(`rl:${apiKey}:${minute}`, 1, { ttlIfNew: 120 });
+if (count > limitPerMinute) return res.status(429).end();
+```
 
 [![@orkify/cache](https://img.shields.io/npm/v/@orkify/cache?label=%40orkify%2Fcache)](https://www.npmjs.com/package/@orkify/cache) **[Full documentation](packages/cache/#readme)**
 
