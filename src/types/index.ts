@@ -204,6 +204,7 @@ export type TelemetryEventType =
   | 'process:reloaded'
   | 'process:start'
   | 'process:stop'
+  | 'telemetry:rate_limited'
   | 'worker:crash'
   | 'worker:exit'
   | 'worker:maxRestarts'

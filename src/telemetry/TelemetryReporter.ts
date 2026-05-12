@@ -48,6 +48,7 @@ export class TelemetryReporter extends EventEmitter {
   private configStore: ConfigStore | null;
   private alertEvaluator: AlertEvaluator | null;
   private mcpCapable = false;
+  private rateLimitedStreak = false;
   /** Previous cumulative cache counters per worker — keyed by "processName:workerId" */
   private prevCacheCounters = new Map<string, { hits: number; misses: number }>();
 
@@ -447,9 +448,32 @@ export class TelemetryReporter extends EventEmitter {
 
       if (!response.ok) {
         const body = await response.text().catch(() => '');
-        console.error(`Telemetry flush failed: ${response.status} ${response.statusText} ${body}`);
+        if (response.status === 429) {
+          const retryAfter = response.headers.get('Retry-After') ?? 'unknown';
+          console.warn(
+            `Telemetry rate-limited by server (429). Retry-After: ${retryAfter}s. ` +
+              `Buffer preserved for next tick.`
+          );
+          // Emit ONE event per rate-limit streak (transition healthy→limited).
+          // Without this, a CLI stuck above the limit would emit one event per
+          // 10s tick and flood operator notifications when the streak ends.
+          if (!this.rateLimitedStreak) {
+            this.rateLimitedStreak = true;
+            this.events.push({
+              type: 'telemetry:rate_limited',
+              processName: '__agent__',
+              timestamp: Date.now(),
+              details: { retryAfter, status: 429 },
+            });
+          }
+        } else {
+          console.error(
+            `Telemetry flush failed: ${response.status} ${response.statusText} ${body}`
+          );
+        }
         this.restoreBuffers(eventsToSend, metricsToSend, errorsToSend, logsToSend, alertsToSend);
       } else {
+        this.rateLimitedStreak = false;
         // Parse response for pending commands and config sync
         try {
           const responseBody = (await response.json()) as {

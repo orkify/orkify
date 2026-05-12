@@ -628,6 +628,93 @@ describe('TelemetryReporter', () => {
       expect(body.events).toHaveLength(1);
     });
 
+    it('emits only one rate_limited event per streak, resets after a 2xx', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const rl429 = () => ({
+        ok: false,
+        status: 429,
+        statusText: 'Too Many Requests',
+        text: () => Promise.resolve('rate_limited'),
+        headers: new Headers({ 'Retry-After': '30' }),
+      });
+
+      // Two 429s back-to-back → only one event emitted (transition only)
+      fetchSpy.mockResolvedValueOnce(rl429());
+      fetchSpy.mockResolvedValueOnce(rl429());
+      reporter.start();
+
+      (orchestrator as unknown as EventEmitter).emit('process:start', {
+        processName: 'app',
+        processId: 0,
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      // Now succeed — flush sends everything buffered
+      fetchSpy.mockResolvedValueOnce({ ok: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const lastSuccess = JSON.parse(fetchSpy.mock.calls[2][1].body);
+      const rlEvents = lastSuccess.events.filter(
+        (e: { type: string }) => e.type === 'telemetry:rate_limited'
+      );
+      expect(rlEvents).toHaveLength(1);
+
+      // Now another 429 streak — should emit a fresh event since streak reset
+      fetchSpy.mockResolvedValueOnce(rl429());
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      fetchSpy.mockResolvedValueOnce({ ok: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const secondSuccess = JSON.parse(fetchSpy.mock.lastCall[1].body);
+      const rlEvents2 = secondSuccess.events.filter(
+        (e: { type: string }) => e.type === 'telemetry:rate_limited'
+      );
+      expect(rlEvents2).toHaveLength(1);
+    });
+
+    it('logs a distinct warning on 429 and emits a telemetry:rate_limited event', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      fetchSpy.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        statusText: 'Too Many Requests',
+        text: () => Promise.resolve('rate_limited'),
+        headers: new Headers({ 'Retry-After': '42' }),
+      });
+      reporter.start();
+
+      (orchestrator as unknown as EventEmitter).emit('process:start', {
+        processName: 'app',
+        processId: 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const msg = String(warnSpy.mock.calls[0][0]);
+      expect(msg).toContain('429');
+      expect(msg).toContain('42');
+
+      // Next successful flush includes both the original process:start AND the
+      // rate_limited event the CLI synthesized.
+      fetchSpy.mockResolvedValue({ ok: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const body = JSON.parse(fetchSpy.mock.calls[1][1].body);
+      const types = body.events.map((e: { type: string }) => e.type);
+      expect(types).toContain('process:start');
+      expect(types).toContain('telemetry:rate_limited');
+
+      const rl = body.events.find((e: { type: string }) => e.type === 'telemetry:rate_limited');
+      expect(rl.processName).toBe('__agent__');
+      expect(rl.details.retryAfter).toBe('42');
+      expect(rl.details.status).toBe(429);
+    });
+
     it('trims restored buffer past MAX_BATCH_SIZE * 2', async () => {
       fetchSpy.mockRejectedValue(new Error('always fails'));
       reporter.start();
