@@ -1,6 +1,6 @@
 {
   "name": "@orkify/next",
-  "version": "1.0.0-beta.12",
+  "version": "1.0.0-beta.13",
   "description": "Next.js integration for orkify — cache handlers and browser error tracking",
   "keywords": [
     "nextjs",
@@ -60,7 +60,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@orkify/cache": "^1.0.0-beta.12"
+    "@orkify/cache": "^1.0.0-beta.13"
   },
   "peerDependencies": {
     "react": ">=18",
