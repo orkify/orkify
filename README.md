@@ -1,6 +1,5 @@
 <h1><img src="assets/icon.png" alt="" width="36" align="center" /> orkify</h1>
 
-[![Beta](https://img.shields.io/badge/status-beta-yellow)](https://github.com/orkify/orkify)
 [![CI](https://github.com/orkify/orkify/actions/workflows/ci.yml/badge.svg)](https://github.com/orkify/orkify/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@orkify/cli)](https://www.npmjs.com/package/@orkify/cli)
 [![Node](https://img.shields.io/node/v/@orkify/cli)](https://nodejs.org/)
