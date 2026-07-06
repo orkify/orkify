@@ -1078,6 +1078,66 @@ describe('TelemetryReporter', () => {
     });
   });
 
+  describe('subscription_inactive notice', () => {
+    const NOTICE = /dashboard paused/i;
+
+    function flushOnce() {
+      (orchestrator as unknown as EventEmitter).emit('process:start', {
+        processName: 'app',
+        processId: 0,
+      });
+      return vi.advanceTimersByTimeAsync(10_000);
+    }
+
+    it('warns exactly once across repeated inactive flushes (streak dedup)', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true, subscription_inactive: true }),
+      });
+
+      reporter.start();
+      await flushOnce();
+      await flushOnce();
+      await flushOnce();
+
+      const notices = warnSpy.mock.calls.filter((c) => NOTICE.test(String(c[0])));
+      expect(notices).toHaveLength(1);
+    });
+
+    it('does not warn while the subscription is active', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: true }),
+      });
+
+      reporter.start();
+      await flushOnce();
+
+      expect(warnSpy.mock.calls.filter((c) => NOTICE.test(String(c[0])))).toHaveLength(0);
+    });
+
+    it('warns again after recovery then a new inactive streak', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      let inactive = true;
+      fetchSpy.mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({ ok: true, subscription_inactive: inactive }),
+      }));
+
+      reporter.start();
+      await flushOnce(); // inactive → warn #1
+      inactive = false;
+      await flushOnce(); // active → resets streak
+      inactive = true;
+      await flushOnce(); // inactive again → warn #2
+
+      const notices = warnSpy.mock.calls.filter((c) => NOTICE.test(String(c[0])));
+      expect(notices).toHaveLength(2);
+    });
+  });
+
   describe('worker log fallback to primary ring', () => {
     it('uses primary ring when worker-specific ring is empty', async () => {
       reporter.start();

@@ -49,6 +49,7 @@ export class TelemetryReporter extends EventEmitter {
   private alertEvaluator: AlertEvaluator | null;
   private mcpCapable = false;
   private rateLimitedStreak = false;
+  private subscriptionInactiveStreak = false;
   /** Previous cumulative cache counters per worker — keyed by "processName:workerId" */
   private prevCacheCounters = new Map<string, { hits: number; misses: number }>();
 
@@ -481,12 +482,28 @@ export class TelemetryReporter extends EventEmitter {
             has_commands?: boolean;
             config_hash?: string;
             config?: ProjectConfig;
+            subscription_inactive?: boolean;
           };
           if (responseBody.has_commands) {
             this.emit('commands:pending');
           }
           if (responseBody.config && responseBody.config_hash) {
             this.configStore?.update(responseBody.config, responseBody.config_hash);
+          }
+          // The server accepts (200) but discards telemetry when the dashboard
+          // subscription/trial is inactive. Warn ONCE per streak — the flush runs
+          // every ~10s, so an un-deduped warning would spam the operator's logs.
+          // Warn locally (not a telemetry event — that would be discarded too).
+          if (responseBody.subscription_inactive) {
+            if (!this.subscriptionInactiveStreak) {
+              this.subscriptionInactiveStreak = true;
+              console.warn(
+                'orkify dashboard paused: your plan/trial is inactive, so new telemetry is not being stored. ' +
+                  'Pick a plan to resume — your existing data is safe.'
+              );
+            }
+          } else {
+            this.subscriptionInactiveStreak = false;
           }
         } catch {
           // Ignore JSON parse errors on response
