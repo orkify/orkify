@@ -1,6 +1,6 @@
 {
   "name": "@orkify/chat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Embeddable support chat widget for orkify — powered by Discord",
   "keywords": [
     "chat-widget",
@@ -26,6 +26,11 @@
       "types": "./dist/react.d.ts",
       "import": "./dist/react.js",
       "default": "./dist/react.js"
+    },
+    "./api-base": {
+      "types": "./dist/api-base.d.ts",
+      "import": "./dist/api-base.js",
+      "default": "./dist/api-base.js"
     },
     "./widget": "./orkify-chat.js"
   },

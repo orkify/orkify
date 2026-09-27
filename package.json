@@ -32,7 +32,8 @@
     "dist/**/*.d.ts"
   ],
   "scripts": {
-    "build": "tsc -p packages/cache/tsconfig.json && tsc -p packages/next/tsconfig.json && tsc -p packages/chat/tsconfig.json && tsc",
+    "build": "tsc -p packages/cache/tsconfig.json && tsc -p packages/next/tsconfig.json && tsc -p packages/chat/tsconfig.json && npm run build:widget && tsc",
+    "build:widget": "tsc -p packages/chat/tsconfig.widget.json && esbuild packages/chat/src/widget/index.ts --bundle --minify --outfile=packages/chat/orkify-chat.js --format=iife",
     "dev": "tsc --watch",
     "start": "node dist/cli/index.js",
     "clean": "rm -rf dist coverage packages/cache/dist packages/next/dist",
@@ -111,6 +112,7 @@
     "@types/react": "^19.2.14",
     "@types/tar-stream": "^3.1.4",
     "@vitest/coverage-v8": "^4.0.18",
+    "esbuild": "^0.28.2",
     "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-perfectionist": "^5.6.0",

@@ -20,6 +20,8 @@ Visitor messages are routed through [orkify](https://orkify.com) and delivered t
 - [Identity Verification (HMAC)](#identity-verification-hmac)
 - [GIFs & Stickers](#gifs--stickers)
 - [Widget Attributes](#widget-attributes)
+- [Content Security Policy](#content-security-policy)
+- [Where the Widget Talks To](#where-the-widget-talks-to)
 - [Requirements](#requirements)
 - [License](#license)
 
@@ -175,13 +177,31 @@ Discord stickers sent by your team are rendered with full animation support. Ani
 
 For the script tag integration:
 
-| Attribute            | Required | Description                                                           |
-| -------------------- | -------- | --------------------------------------------------------------------- |
-| `data-widget-key`    | Yes      | Widget key from the orkify Integrations settings page                 |
-| `data-visitor-name`  | No       | Visitor's display name. Skips the intro form when provided with email |
-| `data-visitor-email` | No       | Visitor's email. Used for thread identification                       |
-| `data-visitor-hash`  | No       | HMAC-SHA256 hex digest for identity verification                      |
-| `data-klipy-key`     | No       | Klipy API key to enable the GIF picker                                |
+| Attribute            | Required | Description                                                                                                        |
+| -------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `data-widget-key`    | Yes      | Widget key from the orkify Integrations settings page                                                              |
+| `data-visitor-name`  | No       | Visitor's display name. Skips the intro form when provided with email                                              |
+| `data-visitor-email` | No       | Visitor's email. Used for thread identification                                                                    |
+| `data-visitor-hash`  | No       | HMAC-SHA256 hex digest for identity verification                                                                   |
+| `data-klipy-key`     | No       | Klipy API key to enable the GIF picker                                                                             |
+| `data-api-base`      | No       | Origin the widget calls. Defaults to the origin that served the script, or `https://orkify.com` when that is a CDN |
+
+## Content Security Policy
+
+A site with a CSP has to allow the widget explicitly, or it loads and then does nothing visible. Pin the script to the one file rather than the whole host — a path in a CSP source matches that URL exactly:
+
+```
+script-src  https://orkify.com/orkify-chat.js
+            https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js
+connect-src https://orkify.com https://api.klipy.com
+img-src     https://cdn.discordapp.com https://media.discordapp.net https://*.klipy.com
+```
+
+Use the CDN URL in `script-src` instead if that is where you load it from. `connect-src` carries the chat API and the event stream; `img-src` the avatars and attachments from Discord and the GIF previews from Klipy. The lottie entry is only for animated stickers — blocked, a sticker renders as a text placeholder. Drop the Klipy entries if you do not set `data-klipy-key`.
+
+## Where the Widget Talks To
+
+The widget resolves its API host itself, in this order: an explicit `data-api-base`, otherwise the origin that served the script, and `https://orkify.com` when that origin is a public CDN (jsDelivr, unpkg, cdnjs and the like). So the CDN snippet and a copy you host yourself both work, and a self-hosted orkify serving its own copy is reached without configuration.
 
 ## Requirements
 
