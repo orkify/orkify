@@ -1,4 +1,5 @@
 import { cache } from '@orkify/cache';
+import { deploymentScope, ENTRY_MAX_TTL } from './scope.js';
 
 /**
  * ISR / route cache handler for Next.js (`cacheHandler` config).
@@ -24,6 +25,9 @@ import { cache } from '@orkify/cache';
  */
 const IS_BUILD = process.env.NEXT_PHASE === 'phase-production-build';
 const NEXT_CACHE_TAGS_HEADER = 'x-next-cache-tags';
+
+/** Entries are scoped to the deployment — see scope.ts. */
+const scopedKey = (key: string) => `next:isr:${deploymentScope()}:${key}`;
 
 interface StoredEntry {
   lastModified: number;
@@ -56,7 +60,7 @@ export default class OrkifyCacheHandler {
   async get(key: string): Promise<null | unknown> {
     if (IS_BUILD) return null;
 
-    const stored = await cache.getAsync<StoredEntry>(key);
+    const stored = await cache.getAsync<StoredEntry>(scopedKey(key));
     if (!stored) return null;
 
     return stored;
@@ -84,7 +88,7 @@ export default class OrkifyCacheHandler {
     const tags = mergedTags && mergedTags.length > 0 ? mergedTags : undefined;
 
     const entry: StoredEntry = { value, lastModified: Date.now() };
-    cache.set(key, entry, tags ? { tags } : undefined);
+    cache.set(scopedKey(key), entry, { ttl: ENTRY_MAX_TTL, ...(tags ? { tags } : {}) });
   }
 
   async revalidateTag(tag: string | string[]): Promise<void> {

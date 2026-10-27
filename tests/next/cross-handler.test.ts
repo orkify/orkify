@@ -21,6 +21,8 @@ vi.mock('@orkify/cache', () => {
   return { cache: proxy };
 });
 
+process.env.NEXT_DEPLOYMENT_ID = 'test-deploy';
+
 const { default: IsrHandler } = await import('../../packages/next/src/isr-cache.js');
 const { default: useCacheHandler } = await import('../../packages/next/src/use-cache.js');
 
@@ -60,7 +62,7 @@ describe('cross-handler tag invalidation', () => {
     await isrHandler.revalidateTag('cross-tag');
 
     // use-cache entry should be gone (invalidateTag deletes from the store)
-    expect(testClient.has('uc-key')).toBe(false);
+    expect(testClient.has('next:cache:test-deploy:uc-key')).toBe(false);
   });
 
   it('use-cache updateTags invalidates ISR entries with the same tag', async () => {
@@ -76,7 +78,7 @@ describe('cross-handler tag invalidation', () => {
     // Invalidate via use-cache handler (updateTags without duration = invalidateTag)
     await useCacheHandler.updateTags(['cross-tag-2']);
 
-    expect(testClient.has('isr-key')).toBe(false);
+    expect(testClient.has('next:isr:test-deploy:isr-key')).toBe(false);
   });
 
   it('both handlers share the same tag timestamps', async () => {
@@ -90,7 +92,7 @@ describe('cross-handler tag invalidation', () => {
     // Invalidate via ISR — should delete both entries
     await isrHandler.revalidateTag('shared');
 
-    expect(testClient.has('uc-shared')).toBe(false);
-    expect(testClient.has('isr-shared')).toBe(false);
+    expect(testClient.has('next:cache:test-deploy:uc-shared')).toBe(false);
+    expect(testClient.has('next:isr:test-deploy:isr-shared')).toBe(false);
   });
 });

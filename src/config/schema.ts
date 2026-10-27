@@ -18,7 +18,7 @@ export const startOptionsSchema = z.object({
   watch: z.boolean().default(false),
   watchPaths: z.array(z.string()).optional(),
   cwd: z.string().optional(),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   nodeArgs: z.array(z.string()).default([]),
   args: z.array(z.string()).default([]),
   killTimeout: z.number().int().positive().default(KILL_TIMEOUT),

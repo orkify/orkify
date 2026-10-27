@@ -211,3 +211,66 @@ describe('rate limiting', () => {
     expect(res.status).toBe(429);
   });
 });
+
+// Source context comes from an unauthenticated browser report — it must only
+// ever read bundled browser code under .next/static, never other server files.
+describe('source context scope', () => {
+  let appDir: string;
+  let ipSeq = 0;
+
+  beforeAll(async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    appDir = mkdtempSync(join(tmpdir(), 'orkify-eh-'));
+    mkdirSync(join(appDir, '.next', 'static', 'chunks'), { recursive: true });
+    const lines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n');
+    writeFileSync(join(appDir, '.next', 'static', 'chunks', 'page.js'), lines);
+    writeFileSync(join(appDir, 'secret.js'), 'const KEY = "s3cret";\n'.repeat(20));
+    vi.spyOn(process, 'cwd').mockReturnValue(appDir);
+  });
+
+  async function contextFor(stack: string) {
+    mockSend.mockClear();
+    const res = await POST(
+      new Request('http://localhost:3000/orkify/errors', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'http://localhost:3000',
+          Host: 'localhost:3000',
+          'X-Forwarded-For': `10.77.0.${ipSeq++}`,
+        },
+        body: JSON.stringify(validPayload({ stack })),
+      })
+    );
+    expect(res.status).toBe(200);
+    const data = (mockSend.mock.calls[0][0] as { data: { sourceContext: unknown } }).data;
+    return data.sourceContext as null | { target: string }[];
+  }
+
+  it('reads context for frames under /_next/static', async () => {
+    const ctx = await contextFor(
+      '    at f (http://localhost:3000/_next/static/chunks/page.js:10:1)'
+    );
+    expect(ctx?.[0].target).toBe('line 10');
+  });
+
+  it('ignores a URL frame that maps outside .next/static', async () => {
+    const ctx = await contextFor('    at f (http://localhost:3000/secret.js:1:1)');
+    expect(ctx ?? []).toHaveLength(0);
+  });
+
+  it('ignores a raw absolute-path frame (forged stack)', async () => {
+    const { join } = await import('node:path');
+    const ctx = await contextFor(`    at f (${join(appDir, 'secret.js')}:1:1)`);
+    expect(ctx ?? []).toHaveLength(0);
+  });
+
+  it('ignores path traversal out of .next/static', async () => {
+    const ctx = await contextFor(
+      '    at f (http://localhost:3000/_next/static/../../secret.js:1:1)'
+    );
+    expect(ctx ?? []).toHaveLength(0);
+  });
+});

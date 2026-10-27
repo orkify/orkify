@@ -20,6 +20,7 @@ import { restartCommand } from './commands/restart.js';
 import { restoreCommand } from './commands/restore.js';
 import { runCommand } from './commands/run.js';
 import { snapCommand } from './commands/snap.js';
+import { sourcemapsCommand } from './commands/sourcemaps.js';
 import { upCommand } from './commands/up.js';
 
 const program = new Command();
@@ -50,5 +51,6 @@ program.addCommand(deployCommand);
 program.addCommand(mcpCommand);
 program.addCommand(autostartCommand);
 program.addCommand(crashTestCommand);
+program.addCommand(sourcemapsCommand);
 
 program.parse();

@@ -19,6 +19,9 @@ vi.mock('@orkify/cache', () => {
   return { cache: proxy };
 });
 
+process.env.NEXT_DEPLOYMENT_ID = 'test-deploy';
+const isrKey = (key: string) => `next:isr:test-deploy:${key}`;
+
 const { default: OrkifyCacheHandler } = await import('../../packages/next/src/isr-cache.js');
 
 describe('isr-cache handler', () => {
@@ -70,12 +73,12 @@ describe('isr-cache handler', () => {
     it('stores with explicit tags from ctx', async () => {
       await handler.set('page', { html: '<p>content</p>' }, { tags: ['page-tag'] });
 
-      const stored = testClient.get<{ value: unknown }>('page');
+      const stored = testClient.get<{ value: unknown }>(isrKey('page'));
       expect(stored?.value).toEqual({ html: '<p>content</p>' });
 
       // Verify tags work
       testClient.invalidateTag('page-tag');
-      expect(testClient.get('page')).toBeUndefined();
+      expect(testClient.get(isrKey('page'))).toBeUndefined();
     });
 
     it('extracts tags from x-next-cache-tags header', async () => {
@@ -88,7 +91,7 @@ describe('isr-cache handler', () => {
 
       // Invalidating by tag should remove the entry
       testClient.invalidateTag('posts');
-      expect(testClient.get('/posts')).toBeUndefined();
+      expect(testClient.get(isrKey('/posts'))).toBeUndefined();
     });
 
     it('stores with lastModified timestamp', async () => {
@@ -96,7 +99,7 @@ describe('isr-cache handler', () => {
       await handler.set('timed', { data: 1 }, { tags: [] });
       const after = Date.now();
 
-      const stored = testClient.get<{ value: unknown; lastModified: number }>('timed');
+      const stored = testClient.get<{ value: unknown; lastModified: number }>(isrKey('timed'));
       expect(stored?.lastModified).toBeGreaterThanOrEqual(before);
       expect(stored?.lastModified).toBeLessThanOrEqual(after);
     });
@@ -104,7 +107,7 @@ describe('isr-cache handler', () => {
     it('stores with empty tags', async () => {
       await handler.set('no-tags', { data: 1 }, { tags: [] });
 
-      const stored = testClient.get<{ value: unknown }>('no-tags');
+      const stored = testClient.get<{ value: unknown }>(isrKey('no-tags'));
       expect(stored?.value).toEqual({ data: 1 });
     });
 
@@ -113,7 +116,7 @@ describe('isr-cache handler', () => {
 
       // Invalidating any one tag removes the entry
       testClient.invalidateTag('b');
-      expect(testClient.get('multi-tag')).toBeUndefined();
+      expect(testClient.get(isrKey('multi-tag'))).toBeUndefined();
     });
 
     it('merges ctx.tags with x-next-cache-tags header', async () => {
@@ -126,7 +129,7 @@ describe('isr-cache handler', () => {
 
       // Invalidating by header-only tag should remove the entry
       testClient.invalidateTag('header-tag');
-      expect(testClient.get('/merged')).toBeUndefined();
+      expect(testClient.get(isrKey('/merged'))).toBeUndefined();
     });
 
     it('deduplicates overlapping ctx.tags and header tags', async () => {
@@ -137,11 +140,11 @@ describe('isr-cache handler', () => {
       };
       await handler.set('/dedup', data, { tags: ['shared', 'ctx-only'] });
 
-      expect(testClient.get('/dedup')).not.toBeUndefined();
+      expect(testClient.get(isrKey('/dedup'))).not.toBeUndefined();
 
       // ctx-only tag works
       testClient.invalidateTag('ctx-only');
-      expect(testClient.get('/dedup')).toBeUndefined();
+      expect(testClient.get(isrKey('/dedup'))).toBeUndefined();
     });
   });
 
@@ -159,13 +162,13 @@ describe('isr-cache handler', () => {
     it('with string[] works', async () => {
       await handler.set('x', { v: 10 }, { tags: ['alpha'] });
       await handler.set('y', { v: 20 }, { tags: ['beta'] });
-      testClient.set('z', 30);
+      testClient.set(isrKey('z'), 30);
 
       await handler.revalidateTag(['alpha', 'beta']);
 
       expect(await handler.get('x')).toBeNull();
       expect(await handler.get('y')).toBeNull();
-      expect(testClient.get('z')).toBe(30);
+      expect(testClient.get(isrKey('z'))).toBe(30);
     });
 
     it('only invalidates matching tags', async () => {
@@ -214,7 +217,7 @@ describe('isr-cache handler', () => {
       await handler.set('route', data, { tags: [] });
 
       // Stored value.headers should be a plain object, not Headers
-      const raw = testClient.get<{ value: Record<string, unknown> }>('route');
+      const raw = testClient.get<{ value: Record<string, unknown> }>(isrKey('route'));
       expect(raw?.value?.headers).not.toBeInstanceOf(Headers);
       expect(raw?.value?.headers).toEqual({
         'content-type': 'application/json',

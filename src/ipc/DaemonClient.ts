@@ -1,13 +1,5 @@
 import { spawn } from 'node:child_process';
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +16,7 @@ import {
   SOCKET_PATH,
   TELEMETRY_DEFAULT_API_HOST,
 } from '../constants.js';
+import { createPidFile } from '../pid-file.js';
 import { createMessageParser, createRequest, serialize } from './protocol.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -138,11 +131,10 @@ export class DaemonClient {
    */
   private acquireLock(): boolean {
     try {
-      const fd = openSync(DAEMON_LOCK_FILE, 'wx');
-      writeFileSync(fd, String(process.pid));
-      closeSync(fd);
+      closeSync(createPidFile(DAEMON_LOCK_FILE));
       return true;
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err; // e.g. ENOSPC — surface it
       // Lock file exists — check if holder is still alive
       try {
         const holderPid = parseInt(readFileSync(DAEMON_LOCK_FILE, 'utf-8').trim(), 10);
@@ -152,9 +144,7 @@ export class DaemonClient {
         // Holder is dead — take over stale lock
         try {
           unlinkSync(DAEMON_LOCK_FILE);
-          const fd = openSync(DAEMON_LOCK_FILE, 'wx');
-          writeFileSync(fd, String(process.pid));
-          closeSync(fd);
+          closeSync(createPidFile(DAEMON_LOCK_FILE));
           return true;
         } catch {
           return false; // race with another takeover

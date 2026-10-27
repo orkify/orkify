@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProcessConfig } from '../../src/types/index.js';
 import { ORKIFY_CONFIG_FILE } from '../../src/constants.js';
 import { getOrkifyConfig } from '../../src/deploy/config.js';
+import { nextDeploymentId, shouldStashSourceMaps } from '../../src/deploy/DeployExecutor.js';
 import { detectFramework } from '../../src/detect/framework.js';
 
 describe('DeployExecutor reconcile integration', () => {
@@ -160,12 +161,35 @@ processes:
       expect(detectFramework(tempDir)).toBeUndefined();
     });
 
-    it('NEXT_DEPLOYMENT_ID format matches v{version}-{artifactSlice}', () => {
-      const version = 42;
-      const artifactId = 'abcdef1234567890';
-      const id = `v${version}-${artifactId.slice(0, 8)}`;
-      expect(id).toBe('v42-abcdef12');
-      expect(id).toMatch(/^v\d+-[a-f0-9]{8}$/);
+    it('NEXT_DEPLOYMENT_ID is v{version}-{artifactSlice}-{deployTime}', () => {
+      expect(nextDeploymentId(42, 'abcdef1234567890', 1_700_000_000_000)).toBe(
+        `v42-abcdef12-${(1_700_000_000_000).toString(36)}`
+      );
+    });
+
+    it('a redeploy of the same artifact gets a new NEXT_DEPLOYMENT_ID', () => {
+      const first = nextDeploymentId(42, 'abcdef1234567890', 1_700_000_000_000);
+      const again = nextDeploymentId(42, 'abcdef1234567890', 1_700_000_060_000);
+      expect(again).not.toBe(first);
+    });
+  });
+
+  describe('Next.js source map stashing', () => {
+    it('stashes by default for Next.js apps', () => {
+      expect(shouldStashSourceMaps(true, { install: 'npm ci' })).toBe(true);
+      expect(shouldStashSourceMaps(true, { install: 'npm ci', publicSourceMaps: false })).toBe(
+        true
+      );
+    });
+
+    it('keeps maps public when deploy.publicSourceMaps is true', () => {
+      expect(shouldStashSourceMaps(true, { install: 'npm ci', publicSourceMaps: true })).toBe(
+        false
+      );
+    });
+
+    it('never touches non-Next apps', () => {
+      expect(shouldStashSourceMaps(false, { install: 'npm ci' })).toBe(false);
     });
   });
 

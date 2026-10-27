@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { extractContext, parseBrowserFrames, type StackFrame } from './utils.js';
 
@@ -72,10 +73,18 @@ interface SourceContextFrame {
   post: string[];
 }
 
-function buildSourceContext(frames: StackFrame[]): SourceContextFrame[] {
+/**
+ * Build source context for frames — ONLY from files under `.next/static`.
+ * Stack frames come from an unauthenticated browser report, so a forged stack
+ * could otherwise pull lines of any server file into the dashboard. Browser
+ * code is always served from `/_next/static/`, so nothing legitimate is lost.
+ */
+function buildSourceContext(frames: StackFrame[], cwd: string): SourceContextFrame[] {
   const result: SourceContextFrame[] = [];
+  const staticRoot = resolve(cwd, '.next', 'static') + sep;
 
   for (const frame of frames) {
+    if (!resolve(frame.file).startsWith(staticRoot)) continue;
     if (!existsSync(frame.file)) continue;
 
     try {
@@ -187,7 +196,7 @@ export async function POST(request: Request): Promise<Response> {
     const frames = parseBrowserFrames(truncatedStack, cwd);
 
     // 7. Build source context from bundled files on disk
-    const sourceContext = frames.length > 0 ? buildSourceContext(frames) : null;
+    const sourceContext = frames.length > 0 ? buildSourceContext(frames, cwd) : null;
     const topFrame = frames[0] ?? null;
 
     // 8. Relay to daemon via IPC

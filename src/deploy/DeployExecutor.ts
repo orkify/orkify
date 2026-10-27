@@ -23,12 +23,29 @@ import type { TelemetryReporter } from '../telemetry/TelemetryReporter.js';
 import type {
   DeployCommand,
   DeployOptions,
+  DeploySettings,
   DeployStatus,
   TelemetryConfig,
 } from '../types/index.js';
 import { DEPLOY_CRASH_WINDOW_DEFAULT, DEPLOY_META_FILE, ORKIFY_DEPLOYS_DIR } from '../constants.js';
 import { detectFramework } from '../detect/framework.js';
 import { getOrkifyConfig } from './config.js';
+import { stashNextSourceMaps } from './sourcemaps.js';
+
+/**
+ * `NEXT_DEPLOYMENT_ID` for a deploy: `v{version}-{artifact8}-{deployTime36}`.
+ * Unique per deploy — a redeploy of the same artifact rebuilds and can produce
+ * new chunk hashes, so it must not share Next's skew protection or the
+ * deployment-scoped cache entries (`@orkify/next`) of the previous deploy.
+ */
+export function nextDeploymentId(version: number, artifactId: string, now = Date.now()): string {
+  return `v${version}-${artifactId.slice(0, 8)}-${now.toString(36)}`;
+}
+
+/** Whether the deploy moves Next.js browser source maps off the public path. */
+export function shouldStashSourceMaps(isNext: boolean, deploy: DeploySettings): boolean {
+  return isNext && deploy.publicSourceMaps !== true;
+}
 
 export class DeployExecutor {
   private config: TelemetryConfig;
@@ -105,7 +122,7 @@ export class DeployExecutor {
 
       // 2c. Detect Next.js for version skew protection
       if (detectFramework(releaseDir) === 'nextjs') {
-        this.nextDeploymentId = `v${this.cmd.version}-${this.cmd.artifactId.slice(0, 8)}`;
+        this.nextDeploymentId = nextDeploymentId(this.cmd.version, this.cmd.artifactId);
       }
 
       // 3. Fetch secrets
@@ -130,6 +147,16 @@ export class DeployExecutor {
       if (!this.options.skipBuild && deployConfig.build) {
         this.reportPhase('building');
         await this.runCommand(deployConfig.build, releaseDir, buildEnv);
+      }
+
+      // 5b. Take Next.js browser source maps off the public /_next/static path
+      // (opt out with `deploy.publicSourceMaps: true`). The daemon resolves
+      // browser stacks from the private copy.
+      if (shouldStashSourceMaps(this.nextDeploymentId !== undefined, deployConfig)) {
+        const stashed = stashNextSourceMaps(releaseDir);
+        if (stashed > 0) {
+          console.log(`[deploy] Moved ${stashed} browser source map(s) out of .next/static`);
+        }
       }
 
       // 6. Swap symlink

@@ -306,3 +306,5 @@ export const TELEMETRY_REQUEST_TIMEOUT = 10_000;
 export const TELEMETRY_LOG_RING_SIZE = 50;
 export const TELEMETRY_LOG_FLUSH_MAX_LINES = 20;
 export const TELEMETRY_LOG_MAX_LINE_LENGTH = 4000;
+/** Serialized-payload ceiling. The ingest proxy rejects bodies > 1 MiB; stay at half for headroom. */
+export const TELEMETRY_MAX_PAYLOAD_BYTES = 512 * 1024;

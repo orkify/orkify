@@ -333,9 +333,7 @@ const EMOJI_CATEGORIES: { icon: string; emojis: string[] }[] = [
     // __orkify_visitor === undefined means third-party site (preserve localStorage across visits)
     const rawVisitor = (window as unknown as Record<string, unknown>).__orkify_visitor;
     const windowVisitor = rawVisitor as
-      | null
-      | undefined
-      | { name?: string; email?: string; hash?: string };
+      null | undefined | { name?: string; email?: string; hash?: string };
     const presetName = scriptTag.getAttribute('data-visitor-name') || windowVisitor?.name || '';
     const presetEmail = scriptTag.getAttribute('data-visitor-email') || windowVisitor?.email || '';
     const visitorHash = scriptTag.getAttribute('data-visitor-hash') || windowVisitor?.hash || '';
@@ -1136,9 +1134,7 @@ const EMOJI_CATEGORIES: { icon: string; emojis: string[] }[] = [
     function toggle() {
       // Detect auth state change (SPA navigation after login/logout)
       const currentVisitor = (window as unknown as Record<string, unknown>).__orkify_visitor as
-        | null
-        | undefined
-        | { email?: string };
+        null | undefined | { email?: string };
       const currentEmail = currentVisitor?.email || '';
       if (currentEmail !== presetEmail) {
         // Tear down and reinitialize with new visitor context

@@ -23,12 +23,17 @@ import {
   TELEMETRY_LOG_MAX_LINE_LENGTH,
   TELEMETRY_LOG_RING_SIZE,
   TELEMETRY_MAX_BATCH_SIZE,
+  TELEMETRY_MAX_PAYLOAD_BYTES,
   TELEMETRY_METRICS_INTERVAL,
   TELEMETRY_REQUEST_TIMEOUT,
 } from '../constants.js';
 import { getMachineId } from '../machine-id.js';
 import { computeFingerprint, parseFunctionName } from '../probe/compute-fingerprint.js';
 import { resolveSourceMaps } from '../probe/resolve-sourcemaps.js';
+import { fitPayloadToBudget } from './payload-budget.js';
+
+/** Statuses meaning "this exact body is unacceptable" — retrying it can never succeed. */
+const REJECTED_PAYLOAD_STATUSES = new Set([400, 413, 422]);
 
 export class TelemetryReporter extends EventEmitter {
   private config: TelemetryConfig;
@@ -50,6 +55,7 @@ export class TelemetryReporter extends EventEmitter {
   private mcpCapable = false;
   private rateLimitedStreak = false;
   private subscriptionInactiveStreak = false;
+  private payloadRejectedStreak = false;
   /** Previous cumulative cache counters per worker — keyed by "processName:workerId" */
   private prevCacheCounters = new Map<string, { hits: number; misses: number }>();
 
@@ -436,6 +442,33 @@ export class TelemetryReporter extends EventEmitter {
       }
     }
 
+    // Keep the body under the ingest size limit. Without this, one oversized
+    // batch (big crash context, log burst) is rejected with 413, restored, and
+    // resent forever — blocking ALL telemetry, heartbeats included.
+    const fitted = fitPayloadToBudget(payload, TELEMETRY_MAX_PAYLOAD_BYTES);
+    const sent = fitted.payload;
+    if (fitted.droppedLogs > 0 || fitted.slimmedErrors > 0 || fitted.droppedErrors > 0) {
+      const counts = {
+        droppedLogs: fitted.droppedLogs,
+        slimmedErrors: fitted.slimmedErrors,
+        droppedErrors: fitted.droppedErrors,
+      };
+      console.warn(
+        `Telemetry payload exceeded ${TELEMETRY_MAX_PAYLOAD_BYTES} bytes — trimmed ` +
+          `${counts.droppedLogs} log line(s), slimmed ${counts.slimmedErrors} error(s), ` +
+          `dropped ${counts.droppedErrors} error(s).`
+      );
+      sent.events = [
+        ...sent.events,
+        {
+          type: 'telemetry:payload_trimmed',
+          processName: '__agent__',
+          timestamp: Date.now(),
+          details: counts,
+        },
+      ];
+    }
+
     try {
       const response = await fetch(`${this.config.apiHost}/api/v1/ingest/telemetry`, {
         method: 'POST',
@@ -443,7 +476,7 @@ export class TelemetryReporter extends EventEmitter {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.config.apiKey}`,
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(sent),
         signal: AbortSignal.timeout(TELEMETRY_REQUEST_TIMEOUT),
       });
 
@@ -467,14 +500,26 @@ export class TelemetryReporter extends EventEmitter {
               details: { retryAfter, status: 429 },
             });
           }
+        } else if (REJECTED_PAYLOAD_STATUSES.has(response.status)) {
+          // The server will never accept THIS batch — resending it would wedge
+          // telemetry forever. Drop it (warn once per streak); the next tick
+          // carries fresh data.
+          if (!this.payloadRejectedStreak) {
+            this.payloadRejectedStreak = true;
+            console.error(
+              `Telemetry batch rejected (${response.status} ${response.statusText}) — dropping it. ${body}`
+            );
+          }
+          return;
         } else {
           console.error(
             `Telemetry flush failed: ${response.status} ${response.statusText} ${body}`
           );
         }
-        this.restoreBuffers(eventsToSend, metricsToSend, errorsToSend, logsToSend, alertsToSend);
+        this.restoreBuffers(sent.events, sent.metrics, sent.errors, sent.logs, alertsToSend);
       } else {
         this.rateLimitedStreak = false;
+        this.payloadRejectedStreak = false;
         // Parse response for pending commands and config sync
         try {
           const responseBody = (await response.json()) as {
@@ -511,7 +556,7 @@ export class TelemetryReporter extends EventEmitter {
       }
     } catch (err) {
       console.error('Telemetry flush error:', err instanceof Error ? err.message : err);
-      this.restoreBuffers(eventsToSend, metricsToSend, errorsToSend, logsToSend, alertsToSend);
+      this.restoreBuffers(sent.events, sent.metrics, sent.errors, sent.logs, alertsToSend);
     }
   }
 

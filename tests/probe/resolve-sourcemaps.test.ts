@@ -349,6 +349,35 @@ describe('resolveSourceMaps', () => {
       expect(result.sourceContext[0].file).not.toContain('webpack-internal:');
     });
 
+    it('strips turbopack:///[project]/ prefix from source paths (Next 16)', () => {
+      const tpMap = {
+        ...SOURCE_MAP_WEBPACK,
+        sources: ['turbopack:///[project]/src/app.ts'],
+        file: 'tp-bundle.js',
+      };
+      const bundleFile = join(FIXTURE_DIR, 'tp-bundle.js');
+      writeFileSync(
+        bundleFile,
+        'var a=function(){throw new Error("test error")};a();\n//# sourceMappingURL=tp-bundle.js.map'
+      );
+      writeFileSync(join(FIXTURE_DIR, 'tp-bundle.js.map'), JSON.stringify(tpMap));
+
+      const result = resolveSourceMaps([makeFrame(bundleFile, 1, 1, [], 'minified', [])], {
+        file: bundleFile,
+        line: 1,
+        column: 1,
+      });
+
+      expect(result.resolved).toBe(true);
+      assert(result.sourceContext);
+      for (const file of [result.sourceContext[0].file, result.topFrame?.file]) {
+        expect(file).not.toContain('turbopack:');
+        expect(file).not.toContain('[project]');
+        expect(file).toMatch(/src[/\\]app\.ts$/);
+      }
+      expect(result.topFrame?.line).toBe(5);
+    });
+
     it('strips webpack://[name]/ prefix from source paths', () => {
       const namedMap = {
         ...SOURCE_MAP_WEBPACK,

@@ -8,13 +8,10 @@ const nextConfig: NextConfig = {
   experimental: {
     serverSourceMaps: true,
   },
-  // Generate source maps for client bundles so orkify can resolve minified
-  // browser stacks. 'hidden-source-map' produces .map files on disk without
-  // adding a sourceMappingURL comment, so browsers won't fetch them.
-  webpack: (config, { isServer }) => {
-    if (!isServer) {
-      config.devtool = 'hidden-source-map';
-    }
+  // Client source maps so orkify can resolve minified browser stacks.
+  // `orkify deploy` moves them off the public /_next/static path after the build.
+  productionBrowserSourceMaps: true,
+  webpack: (config) => {
     // @orkify packages use NodeNext .js extensions on .ts source files —
     // tell webpack to try .ts/.tsx when it encounters a .js/.jsx import.
     config.resolve.extensionAlias = {

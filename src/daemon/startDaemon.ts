@@ -4,11 +4,9 @@ import {
   createReadStream,
   existsSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
   unlinkSync,
-  writeSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -48,6 +46,7 @@ import { type ClientConnection, DaemonServer } from '../ipc/DaemonServer.js';
 import { createResponse } from '../ipc/protocol.js';
 import { RemoteConfigVerifier } from '../mcp/auth.js';
 import { type McpHttpServer, startMcpHttpServer } from '../mcp/http.js';
+import { createPidFile } from '../pid-file.js';
 import { TelemetryReporter } from '../telemetry/TelemetryReporter.js';
 import { Orchestrator } from './Orchestrator.js';
 
@@ -86,10 +85,9 @@ export interface DaemonContext {
  */
 function acquirePidLock(): number {
   try {
-    const fd = openSync(DAEMON_PID_FILE, 'wx'); // O_CREAT | O_EXCL | O_WRONLY
-    writeSync(fd, String(process.pid));
-    return fd;
-  } catch {
+    return createPidFile(DAEMON_PID_FILE);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err; // e.g. ENOSPC — not a lock conflict
     // PID file exists — check if the holder is still alive
     let holderPid: number;
     try {
@@ -106,15 +104,15 @@ function acquirePidLock(): number {
       }
       try {
         unlinkSync(DAEMON_PID_FILE);
-        const fd = openSync(DAEMON_PID_FILE, 'wx');
-        writeSync(fd, String(process.pid));
-        return fd;
-      } catch {
-        throw new Error('Failed to acquire daemon lock (race with another process)');
+        return createPidFile(DAEMON_PID_FILE);
+      } catch (takeoverErr) {
+        throw new Error('Failed to acquire daemon lock (race with another process)', {
+          cause: takeoverErr,
+        });
       }
     }
 
-    throw new Error(`Another daemon is already running (PID ${holderPid})`);
+    throw new Error(`Another daemon is already running (PID ${holderPid})`, { cause: err });
   }
 }
 

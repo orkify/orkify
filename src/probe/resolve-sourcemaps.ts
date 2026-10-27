@@ -1,8 +1,9 @@
 import { extractContext } from '@orkify/next/utils';
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { type RawSourceMap, SourceMapConsumer } from 'source-map-js';
 import type { SourceContextFrame } from '../types/index.js';
+import { PRIVATE_SOURCEMAP_DIR } from '../deploy/sourcemaps.js';
 
 interface TopFrame {
   file: string;
@@ -19,9 +20,13 @@ interface ResolveResult {
 
 const SOURCEMAP_URL_RE = /\/[/*]#\s*sourceMappingURL=(\S+)\s*(?:\*\/)?$/;
 
-/** Protocol prefixes used by bundlers in source map `sources` entries. */
+/**
+ * Protocol prefixes used by bundlers in source map `sources` entries.
+ * Turbopack (Next 16 default) writes `turbopack:///[project]/src/app/page.tsx`
+ * for app code — strip through `[project]/` so the path is project-relative.
+ */
 const SOURCE_PROTOCOL_RE =
-  /^(?:webpack:\/\/\/|webpack-internal:\/\/\/|webpack:\/\/[^/]*\/|vite-[\w-]+:\/\/)/;
+  /^(?:webpack:\/\/\/|webpack-internal:\/\/\/|webpack:\/\/[^/]*\/|vite-[\w-]+:\/\/|turbopack:\/\/\/(?:\[project\]\/)?)/;
 
 /** Max bytes to read from the tail of a file to find sourceMappingURL. */
 const TAIL_BYTES = 512;
@@ -99,6 +104,33 @@ function findSourceMap(
   }
 }
 
+const NEXT_STATIC_SEGMENT = `${sep}.next${sep}static${sep}`;
+const STANDALONE_SUFFIX = `${sep}.next${sep}standalone`;
+
+/**
+ * Look a Next.js browser chunk's map up in the release's private source map
+ * directory (populated by `orkify deploy`, see deploy/sourcemaps.ts):
+ * `<root>/.next/static/chunks/x.js` → `<root>/.orkify/sourcemaps/chunks/x.js.map`.
+ * For the standalone server, `<root>` is `.next/standalone` and the maps live
+ * in the release root two levels up.
+ */
+function findPrivateSourceMap(filePath: string): null | string {
+  const file = resolve(filePath);
+  const idx = file.lastIndexOf(NEXT_STATIC_SEGMENT);
+  if (idx === -1) return null;
+
+  const appRoot = file.slice(0, idx);
+  const rel = file.slice(idx + NEXT_STATIC_SEGMENT.length) + '.map';
+  const roots = [appRoot];
+  if (appRoot.endsWith(STANDALONE_SUFFIX)) roots.push(appRoot.slice(0, -STANDALONE_SUFFIX.length));
+
+  for (const root of roots) {
+    const candidate = join(root, PRIVATE_SOURCEMAP_DIR, rel);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 /**
  * Strip bundler protocol prefixes from source paths.
  * e.g. "webpack:///src/app.ts" → "src/app.ts"
@@ -148,8 +180,12 @@ function resolveFrame(
   frame: SourceContextFrame,
   consumerCache: Map<string, null | SourceMapConsumer>
 ): null | { frame: SourceContextFrame; functionName: null | string } {
-  // Find the source map (external file or inline data: URL)
-  const sourceMap = findSourceMap(frame.file);
+  // Find the source map: the release's private map dir first (maps taken off
+  // the public path at deploy), then the file's own reference / inline map.
+  const privateMap = findPrivateSourceMap(frame.file);
+  const sourceMap = privateMap
+    ? ({ type: 'file', path: privateMap } as const)
+    : findSourceMap(frame.file);
   let consumer: null | SourceMapConsumer | undefined;
   let mapDir: string = dirname(frame.file);
 

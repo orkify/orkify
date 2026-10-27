@@ -121,6 +121,7 @@ orkify run app.js -w 4
 | `orkify deploy pack [dir]`       | Create a [deploy](#deployment) tarball                           |
 | `orkify deploy local <tarball>`  | [Deploy](#deployment) from a local tarball                       |
 | `orkify deploy upload [dir]`     | Upload a build artifact for [deployment](#deployment)            |
+| `orkify sourcemaps [dir]`        | Move Next.js browser source maps off the public path             |
 | `orkify mcp`                     | Start [MCP](#mcp-integration) server for AI tools (stdio)        |
 | `orkify mcp --simple-http`       | Start [MCP](#mcp-integration) HTTP server (runs inside daemon)   |
 | `orkify mcp stop`                | Stop the [MCP](#mcp-integration) HTTP server                     |
@@ -895,12 +896,14 @@ The `deploy` section configures build/install steps. The `processes` section def
 
 ### Deploy Options
 
-| Field         | Description                                                                      |
-| ------------- | -------------------------------------------------------------------------------- |
-| `install`     | Install command (auto-detected: npm, yarn, pnpm, bun)                            |
-| `build`       | Build command (optional, runs after install)                                     |
-| `buildEnv`    | Build-time-only env vars (e.g. `NEXT_PUBLIC_*`). Not passed to runtime processes |
-| `crashWindow` | Seconds to monitor for crashes after deploy (default: 30)                        |
+| Field              | Description                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `install`          | Install command (auto-detected: npm, yarn, pnpm, bun)                                                        |
+| `build`            | Build command (optional, runs after install)                                                                 |
+| `buildEnv`         | Build-time-only env vars (e.g. `NEXT_PUBLIC_*`). Not passed to runtime processes                             |
+| `crashWindow`      | Seconds to monitor for crashes after deploy (default: 30)                                                    |
+| `sourcemaps`       | `false` excludes `.map` files from the artifact                                                              |
+| `publicSourceMaps` | Next.js: `true` keeps browser source maps public in `.next/static` (default: moved to `.orkify/sourcemaps/`) |
 
 ### Deploy Lifecycle
 

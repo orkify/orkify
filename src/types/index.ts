@@ -204,6 +204,7 @@ export type TelemetryEventType =
   | 'process:reloaded'
   | 'process:start'
   | 'process:stop'
+  | 'telemetry:payload_trimmed'
   | 'telemetry:rate_limited'
   | 'worker:crash'
   | 'worker:exit'
@@ -292,10 +293,7 @@ export interface TelemetryErrorEvent {
   workerId: number;
   timestamp: number;
   errorType:
-    | 'browser:error'
-    | 'browser:unhandledRejection'
-    | 'uncaughtException'
-    | 'unhandledRejection';
+    'browser:error' | 'browser:unhandledRejection' | 'uncaughtException' | 'unhandledRejection';
   name: string;
   message: string;
   stack: string;
@@ -341,7 +339,13 @@ export interface DeploySettings {
   build?: string;
   buildEnv?: Record<string, string>;
   crashWindow?: number;
+  /** `false` excludes .map files from the uploaded artifact. */
   sourcemaps?: boolean;
+  /**
+   * Next.js only: `true` leaves browser source maps in the public
+   * `.next/static`. By default the deploy moves them to `.orkify/sourcemaps/`.
+   */
+  publicSourceMaps?: boolean;
 }
 
 /** @deprecated Use DeploySettings instead */

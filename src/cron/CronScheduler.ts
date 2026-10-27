@@ -19,6 +19,13 @@ const MAX_INTERVAL_MS = 24 * 60 * 60_000;
  * or an error message if invalid, sub-minute, or > 24h.
  */
 export function validateCronSchedule(schedule: string): null | string {
+  // Enforce the field count ourselves: cron-parser >= 5.10 pads short
+  // expressions with defaults, so "* * *" would silently become every-minute.
+  // A short schedule in orkify.yml is a typo, never intent.
+  const fields = schedule.trim().split(/\s+/).length;
+  if (fields !== 5 && fields !== 6) {
+    return `schedule "${schedule}" has ${fields} fields — expected 5 (min hour day month weekday) or 6 (with seconds)`;
+  }
   try {
     const expr = CronExpressionParser.parse(schedule);
     const first = expr.next().toDate();

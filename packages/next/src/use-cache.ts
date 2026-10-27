@@ -1,12 +1,17 @@
 import type { NextCacheEntry, NextCacheHandler, StoredCacheEntry } from './types.js';
 import { cache } from '@orkify/cache';
+import { deploymentScope, ENTRY_MAX_TTL } from './scope.js';
 import { bufferToStream, streamToBuffer } from './stream.js';
 
 const REVALIDATING_PREFIX = '__revalidating:';
 const REVALIDATING_TTL = 30; // seconds
 
+/** Entries are scoped to the deployment — see scope.ts. */
+const scopedKey = (key: string) => `next:cache:${deploymentScope()}:${key}`;
+
 const handler: NextCacheHandler = {
-  async get(cacheKey: string, softTags: string[]): Promise<NextCacheEntry | undefined> {
+  async get(nextKey: string, softTags: string[]): Promise<NextCacheEntry | undefined> {
+    const cacheKey = scopedKey(nextKey);
     const stored = await cache.getAsync<StoredCacheEntry>(cacheKey);
     if (!stored) return undefined;
 
@@ -55,7 +60,8 @@ const handler: NextCacheHandler = {
     };
   },
 
-  async set(cacheKey: string, pendingEntry: Promise<NextCacheEntry>): Promise<void> {
+  async set(nextKey: string, pendingEntry: Promise<NextCacheEntry>): Promise<void> {
+    const cacheKey = scopedKey(nextKey);
     const entry = await pendingEntry;
     const buffer = await streamToBuffer(entry.value);
 
@@ -70,7 +76,9 @@ const handler: NextCacheHandler = {
 
     cache.set(cacheKey, stored, {
       tags: entry.tags,
-      ttl: entry.expire > 0 ? entry.expire : undefined,
+      // Capped so a previous deployment's entries age out (Next's default
+      // `expire` is effectively infinite).
+      ttl: entry.expire > 0 ? Math.min(entry.expire, ENTRY_MAX_TTL) : ENTRY_MAX_TTL,
     });
 
     // Clear the revalidation lock now that fresh content is stored

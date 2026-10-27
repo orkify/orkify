@@ -39,6 +39,7 @@ import {
   TELEMETRY_LOG_FLUSH_MAX_LINES,
   TELEMETRY_LOG_RING_SIZE,
   TELEMETRY_MAX_BATCH_SIZE,
+  TELEMETRY_MAX_PAYLOAD_BYTES,
 } from '../../src/constants.js';
 import { TelemetryReporter } from '../../src/telemetry/TelemetryReporter.js';
 
@@ -713,6 +714,112 @@ describe('TelemetryReporter', () => {
       expect(rl.processName).toBe('__agent__');
       expect(rl.details.retryAfter).toBe('42');
       expect(rl.details.status).toBe(429);
+    });
+
+    const rejected = (status: number) => ({
+      ok: false,
+      status,
+      statusText: 'Rejected',
+      text: () => Promise.resolve('payload_too_large'),
+      headers: new Headers(),
+    });
+
+    it.each([400, 413, 422])(
+      'drops (does NOT restore) a batch the server rejects with %i',
+      async (status) => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        fetchSpy.mockResolvedValueOnce(rejected(status));
+        fetchSpy.mockResolvedValueOnce(rejected(status));
+        reporter.start();
+
+        (orchestrator as unknown as EventEmitter).emit('process:start', {
+          processName: 'app',
+          processId: 0,
+        });
+        await vi.advanceTimersByTimeAsync(10_000);
+
+        // Fresh data on the next tick — the rejected batch must not ride along.
+        (orchestrator as unknown as EventEmitter).emit('process:stop', {
+          processName: 'app',
+          processId: 0,
+        });
+        await vi.advanceTimersByTimeAsync(10_000);
+        const second = JSON.parse(fetchSpy.mock.calls[1][1].body);
+        expect(second.events.map((e: { type: string }) => e.type)).not.toContain('process:start');
+
+        // Two rejections in a row → one error log (once per streak).
+        const rejectLogs = errorSpy.mock.calls.filter((c) =>
+          String(c[0]).includes('Telemetry batch rejected')
+        );
+        expect(rejectLogs).toHaveLength(1);
+      }
+    );
+
+    it('still restores the batch on 5xx after a rejection streak', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      fetchSpy.mockResolvedValueOnce(rejected(413));
+      fetchSpy.mockResolvedValueOnce({ ok: false, status: 503, text: () => Promise.resolve('') });
+      reporter.start();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      (orchestrator as unknown as EventEmitter).emit('process:start', {
+        processName: 'app',
+        processId: 0,
+      });
+      await vi.advanceTimersByTimeAsync(10_000); // 503 → restored
+
+      fetchSpy.mockResolvedValue({ ok: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+      const body = JSON.parse(fetchSpy.mock.lastCall[1].body);
+      expect(body.events.map((e: { type: string }) => e.type)).toContain('process:start');
+    });
+
+    it('trims an oversized batch under the byte budget and reports what it dropped', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      reporter.start();
+
+      // 40 crashes with ~30 KB of source context each ≈ 1.2 MB — over the 1 MiB proxy limit.
+      for (let i = 0; i < 40; i++) {
+        (orchestrator as unknown as EventEmitter).emit('worker:error:captured', {
+          processName: 'app',
+          workerId: 0,
+          error: {
+            errorType: 'uncaughtException',
+            name: 'Error',
+            message: `boom ${i}`,
+            stack: 'at bundle.js:1:1',
+            fingerprint: `fp${i}`,
+            timestamp: i,
+            nodeVersion: 'v22.0.0',
+            pid: 1,
+            sourceContext: [
+              {
+                file: '/p/bundle.js',
+                line: 1,
+                column: 1,
+                pre: [],
+                target: 'x'.repeat(30_000),
+                post: [],
+              },
+            ],
+            topFrame: { file: '/p/bundle.js', line: 1, column: 1 },
+          },
+        });
+      }
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const raw: string = fetchSpy.mock.calls[0][1].body;
+      expect(Buffer.byteLength(raw)).toBeLessThanOrEqual(TELEMETRY_MAX_PAYLOAD_BYTES + 1024);
+      const body = JSON.parse(raw);
+      // Every crash still reported — only the heavy context was shed.
+      expect(body.errors).toHaveLength(40);
+      const trimmed = body.events.find(
+        (e: { type: string }) => e.type === 'telemetry:payload_trimmed'
+      );
+      expect(trimmed.details.slimmedErrors).toBeGreaterThan(0);
+      expect(trimmed.details.droppedErrors).toBe(0);
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('trimmed'))).toBe(true);
     });
 
     it('trims restored buffer past MAX_BATCH_SIZE * 2', async () => {

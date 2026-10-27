@@ -25,15 +25,8 @@ const nextConfig: NextConfig = {
   experimental: {
     serverSourceMaps: true,
   },
-  webpack: (config, { isServer }) => {
-    if (!isServer) {
-      config.devtool = 'hidden-source-map';
-    }
-    return config;
-  },
-  // Turbopack is default in Next.js 16; empty config silences the
-  // "webpack config without turbopack config" error during builds.
-  turbopack: {},
+  // Client maps; `orkify deploy` / `orkify sourcemaps` move them off the public path.
+  productionBrowserSourceMaps: true,
 };
 
 export default nextConfig;

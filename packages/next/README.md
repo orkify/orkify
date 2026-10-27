@@ -159,19 +159,22 @@ const nextConfig: NextConfig = {
   experimental: {
     serverSourceMaps: true,
   },
-  webpack: (config, { isServer }) => {
-    if (!isServer) {
-      config.devtool = 'hidden-source-map';
-    }
-    return config;
-  },
-  // Turbopack is default in Next.js 16; empty config silences the
-  // "webpack config without turbopack config" error during builds.
-  turbopack: {},
+  // Client source maps — works with Turbopack (Next 16 default) and webpack.
+  productionBrowserSourceMaps: true,
 };
 ```
 
-`hidden-source-map` produces `.map` files on disk without exposing them to browsers. orkify reads these files server-side to resolve minified stacks.
+`productionBrowserSourceMaps` writes the `.map` files into `.next/static`, which Next serves publicly. **`orkify deploy` takes them off the public path** after the build: every `.map` under `.next/static` (and the standalone copy) moves to `<release>/.orkify/sourcemaps/`, where only the orkify daemon reads them to resolve minified browser stacks. The `sourceMappingURL` comments stay and simply 404 in the browser. Maps are kept per release, so a rollback resolves against its own maps. To keep the maps public instead (e.g. for browser devtools in production), set `deploy.publicSourceMaps: true` in `orkify.yml`.
+
+Not deploying with `orkify deploy` (`orkify up` / `orkify run`)? Run the same step after your build:
+
+```json
+{
+  "scripts": {
+    "build": "next build && orkify sourcemaps"
+  }
+}
+```
 
 ### Error Boundaries
 
@@ -243,7 +246,9 @@ Headers are preserved on loopback requests (`127.0.0.1`, `::1`, `::ffff:127.0.0.
 
 During `orkify deploy`, old and new workers coexist briefly. If client-side bundle hashes changed, a user who loaded a page from an old worker may request assets that only exist in the new version.
 
-orkify auto-sets `NEXT_DEPLOYMENT_ID` during deploy (format: `v{version}-{artifactSlice}`). Next.js uses this to tag asset URLs and handle version mismatches gracefully. If you set `NEXT_DEPLOYMENT_ID` in your secrets, orkify won't overwrite it.
+orkify auto-sets `NEXT_DEPLOYMENT_ID` during deploy (format: `v{version}-{artifactSlice}-{deployTime}`), unique per deploy — even a redeploy of the same artifact gets a new id. Next.js uses this to tag asset URLs and handle version mismatches gracefully. If you set `NEXT_DEPLOYMENT_ID` in your secrets, orkify won't overwrite it.
+
+The cache handlers scope every entry to the deployment (`next:isr:<deployment>:<key>`, `next:cache:<deployment>:<key>`), so a new deploy never serves pages rendered by the previous build (whose hashed CSS/JS chunks no longer exist). Without a deployment id (`orkify up` / `orkify run`), the scope is Next's `.next/BUILD_ID`. Entries expire after at most 7 days, so old deployments' entries age out of the file-backed cache on their own. Tags are not scoped — `revalidateTag()` applies across builds.
 
 ## Requirements
 

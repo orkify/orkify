@@ -26,6 +26,9 @@ vi.mock('@orkify/cache', () => {
 });
 
 // Import after mock setup
+process.env.NEXT_DEPLOYMENT_ID = 'test-deploy';
+const ucKey = (key: string) => `next:cache:test-deploy:${key}`;
+
 const { default: handler } = await import('../../packages/next/src/use-cache.js');
 
 function makeEntry(overrides: Partial<NextCacheEntry> = {}): NextCacheEntry {
@@ -65,7 +68,7 @@ describe('use-cache handler', () => {
         expire: 600,
         revalidate: 120,
       };
-      testClient.set('key1', stored);
+      testClient.set(ucKey('key1'), stored);
 
       const result = await handler.get('key1', []);
       expect(result).toBeDefined();
@@ -89,12 +92,12 @@ describe('use-cache handler', () => {
         expire: 300, // expired 100s ago
         revalidate: 0,
       };
-      testClient.set('expired', stored);
+      testClient.set(ucKey('expired'), stored);
 
       const result = await handler.get('expired', []);
       expect(result).toBeUndefined();
       // Hard expire deletes the entry from the cache
-      expect(testClient.has('expired')).toBe(false);
+      expect(testClient.has(ucKey('expired'))).toBe(false);
     });
 
     it('returns undefined when past revalidate window but keeps the entry', async () => {
@@ -106,13 +109,13 @@ describe('use-cache handler', () => {
         expire: 300,
         revalidate: 60, // revalidate after 60s
       };
-      testClient.set('revalidate-me', stored);
+      testClient.set(ucKey('revalidate-me'), stored);
 
       const result = await handler.get('revalidate-me', []);
       expect(result).toBeUndefined();
       // Unlike hard-expire, revalidate does NOT delete — entry stays for
       // background revalidation to replace it
-      expect(testClient.has('revalidate-me')).toBe(true);
+      expect(testClient.has(ucKey('revalidate-me'))).toBe(true);
     });
 
     it('returns entry when within revalidate window', async () => {
@@ -124,7 +127,7 @@ describe('use-cache handler', () => {
         expire: 300,
         revalidate: 60, // revalidate after 60s — still within window
       };
-      testClient.set('fresh-revalidate', stored);
+      testClient.set(ucKey('fresh-revalidate'), stored);
 
       const result = await handler.get('fresh-revalidate', []);
       expect(result).toBeDefined();
@@ -140,7 +143,7 @@ describe('use-cache handler', () => {
         expire: 300,
         revalidate: 0,
       };
-      testClient.set('soft-tagged', stored);
+      testClient.set(ucKey('soft-tagged'), stored);
 
       // Invalidate the soft tag after the entry was created
       testClient.updateTagTimestamp('soft-tag', entryTs + 1000);
@@ -149,7 +152,7 @@ describe('use-cache handler', () => {
       expect(result).toBeUndefined();
       // Soft-tag invalidation does NOT delete — the entry may still be
       // valid for gets without that soft tag
-      expect(testClient.has('soft-tagged')).toBe(true);
+      expect(testClient.has(ucKey('soft-tagged'))).toBe(true);
     });
 
     it('returns entry when softTags are empty', async () => {
@@ -161,7 +164,7 @@ describe('use-cache handler', () => {
         expire: 300,
         revalidate: 0,
       };
-      testClient.set('no-soft', stored);
+      testClient.set(ucKey('no-soft'), stored);
 
       const result = await handler.get('no-soft', []);
       expect(result).toBeDefined();
@@ -176,7 +179,7 @@ describe('use-cache handler', () => {
         expire: 300,
         revalidate: 0,
       };
-      testClient.set('fresh-entry', stored);
+      testClient.set(ucKey('fresh-entry'), stored);
 
       // Tag was invalidated before the entry was created
       testClient.updateTagTimestamp('old-tag', stored.timestamp - 1000);
@@ -194,7 +197,7 @@ describe('use-cache handler', () => {
         expire: 0, // no hard expiration
         revalidate: 0,
       };
-      testClient.set('no-expire', stored);
+      testClient.set(ucKey('no-expire'), stored);
 
       const result = await handler.get('no-expire', []);
       expect(result).toBeDefined();
@@ -211,12 +214,12 @@ describe('use-cache handler', () => {
       const setPromise = handler.set('pending-key', pending);
 
       // Not stored yet
-      expect(testClient.has('pending-key')).toBe(false);
+      expect(testClient.has(ucKey('pending-key'))).toBe(false);
 
       resolve(makeEntry());
       await setPromise;
 
-      expect(testClient.has('pending-key')).toBe(true);
+      expect(testClient.has(ucKey('pending-key'))).toBe(true);
     });
 
     it('consumes stream to Buffer and preserves all fields', async () => {
@@ -232,7 +235,7 @@ describe('use-cache handler', () => {
       });
       await handler.set('stream-key', Promise.resolve(entry));
 
-      const stored = testClient.get<StoredCacheEntry>('stream-key');
+      const stored = testClient.get<StoredCacheEntry>(ucKey('stream-key'));
       expect(stored).toBeDefined();
       if (!stored) return;
 
@@ -254,11 +257,11 @@ describe('use-cache handler', () => {
       const entry = makeEntry({ expire: 2 });
       await handler.set('ttl-key', Promise.resolve(entry));
 
-      expect(localClient.has('ttl-key')).toBe(true);
+      expect(localClient.has(ucKey('ttl-key'))).toBe(true);
 
       vi.advanceTimersByTime(2001);
 
-      expect(localClient.has('ttl-key')).toBe(false);
+      expect(localClient.has(ucKey('ttl-key'))).toBe(false);
 
       testClient = prev;
       localClient.destroy();
@@ -269,7 +272,7 @@ describe('use-cache handler', () => {
       const entry = makeEntry({ expire: 0 });
       await handler.set('no-ttl', Promise.resolve(entry));
 
-      const stored = testClient.get<StoredCacheEntry>('no-ttl');
+      const stored = testClient.get<StoredCacheEntry>(ucKey('no-ttl'));
       expect(stored).toBeDefined();
       if (!stored) return;
 
@@ -350,7 +353,7 @@ describe('use-cache handler', () => {
         expire: 300,
         revalidate: 60, // revalidate after 60s
       };
-      testClient.set('coal-key', stored);
+      testClient.set(ucKey('coal-key'), stored);
 
       // First get() should return undefined and set the lock
       const first = await handler.get('coal-key', []);
@@ -376,7 +379,7 @@ describe('use-cache handler', () => {
         expire: 300,
         revalidate: 60,
       };
-      testClient.set('no-lock', stored);
+      testClient.set(ucKey('no-lock'), stored);
 
       // No lock set — should return undefined
       const result = await handler.get('no-lock', []);
@@ -392,16 +395,16 @@ describe('use-cache handler', () => {
         expire: 300,
         revalidate: 60,
       };
-      testClient.set('clear-lock', stored);
+      testClient.set(ucKey('clear-lock'), stored);
 
       // Trigger revalidation (sets the lock)
       await handler.get('clear-lock', []);
-      expect(testClient.has('__revalidating:clear-lock')).toBe(true);
+      expect(testClient.has('__revalidating:' + ucKey('clear-lock'))).toBe(true);
 
       // set() should clear the lock
       const freshEntry = makeEntry({ timestamp: Date.now() });
       await handler.set('clear-lock', Promise.resolve(freshEntry));
-      expect(testClient.has('__revalidating:clear-lock')).toBe(false);
+      expect(testClient.has('__revalidating:' + ucKey('clear-lock'))).toBe(false);
     });
 
     it('revalidation lock auto-expires after TTL', async () => {
@@ -418,16 +421,16 @@ describe('use-cache handler', () => {
         expire: 300,
         revalidate: 60,
       };
-      localClient.set('ttl-lock', stored);
+      localClient.set(ucKey('ttl-lock'), stored);
 
       // Trigger revalidation (sets lock with 30s TTL)
       await handler.get('ttl-lock', []);
-      expect(localClient.has('__revalidating:ttl-lock')).toBe(true);
+      expect(localClient.has('__revalidating:' + ucKey('ttl-lock'))).toBe(true);
 
       // Advance past lock TTL (30s)
       vi.advanceTimersByTime(31_000);
 
-      expect(localClient.has('__revalidating:ttl-lock')).toBe(false);
+      expect(localClient.has('__revalidating:' + ucKey('ttl-lock'))).toBe(false);
 
       testClient = prev;
       localClient.destroy();
@@ -444,10 +447,10 @@ describe('use-cache handler', () => {
         expire: 300,
         revalidate: 0, // no revalidation window
       };
-      testClient.set('soft-coal', stored);
+      testClient.set(ucKey('soft-coal'), stored);
 
       // Set a revalidation lock (shouldn't matter for soft tag invalidation)
-      testClient.set('__revalidating:soft-coal', true, { ttl: 30 });
+      testClient.set('__revalidating:' + ucKey('soft-coal'), true, { ttl: 30 });
 
       // Invalidate the soft tag
       testClient.updateTagTimestamp('soft-tag-coal', entryTs + 1000);
@@ -466,14 +469,14 @@ describe('use-cache handler', () => {
         expire: 300, // expired 100s ago
         revalidate: 60,
       };
-      testClient.set('hard-coal', stored);
+      testClient.set(ucKey('hard-coal'), stored);
 
       // Set a revalidation lock (shouldn't matter for hard expiration)
-      testClient.set('__revalidating:hard-coal', true, { ttl: 30 });
+      testClient.set('__revalidating:' + ucKey('hard-coal'), true, { ttl: 30 });
 
       const result = await handler.get('hard-coal', []);
       expect(result).toBeUndefined();
-      expect(testClient.has('hard-coal')).toBe(false);
+      expect(testClient.has(ucKey('hard-coal'))).toBe(false);
     });
   });
 
@@ -512,12 +515,12 @@ describe('use-cache handler', () => {
       });
 
       await handler.set('inv-key', Promise.resolve(entry));
-      expect(testClient.has('inv-key')).toBe(true);
+      expect(testClient.has(ucKey('inv-key'))).toBe(true);
 
       await handler.updateTags(['inv-tag']);
 
       // The entry was deleted by invalidateTag
-      expect(testClient.has('inv-key')).toBe(false);
+      expect(testClient.has(ucKey('inv-key'))).toBe(false);
     });
 
     it('set -> updateTags with expire -> get returns undefined (soft tag stale)', async () => {
@@ -538,7 +541,7 @@ describe('use-cache handler', () => {
       expect(result).toBeUndefined();
 
       // But the entry itself still exists (not deleted)
-      expect(testClient.has('se-key')).toBe(true);
+      expect(testClient.has(ucKey('se-key'))).toBe(true);
     });
 
     it('multiple gets return independent streams', async () => {
