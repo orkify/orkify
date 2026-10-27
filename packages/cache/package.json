@@ -1,6 +1,6 @@
 {
   "name": "@orkify/cache",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Framework-agnostic shared cache for orkify-managed Node.js processes & clusters",
   "keywords": [
     "cache",
@@ -17,7 +17,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/orkify/orkify.git",
+    "url": "git+https://github.com/orkify/orkify.git",
     "directory": "packages/cache"
   },
   "homepage": "https://orkify.com",
