@@ -11,7 +11,7 @@
   "dependencies": {
     "@orkify/cache": "file:../../packages/cache",
     "@orkify/next": "file:../../packages/next",
-    "next": "^16.0.0",
+    "next": "^16.4.5",
     "@orkify/cli": "file:../../",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
